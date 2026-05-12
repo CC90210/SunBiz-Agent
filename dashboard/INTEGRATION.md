@@ -6,7 +6,7 @@ This folder is the contract between the Sun Biz Agent repo and the shared Agent 
 
 - Sun Biz Agent is a separate client product, not a permanent row-level tenant inside CC's internal ops app.
 - Client operational data is Turso/libSQL-first.
-- The shared Agent Command Center may still render the Sun profile/sidebar shell while the dedicated runtime comes online.
+- The shared Agent Command Center renders the Sun profile/sidebar shell while the dedicated runtime lives in this repo.
 - Shared infra can stay in Business-Empire-Agent where it adds leverage: V6 state sync, event bus registration, dashboard chrome, and onboarding rails.
 
 ## Command Center contract
@@ -17,6 +17,8 @@ This folder is the contract between the Sun Biz Agent repo and the shared Agent 
 - Subtitle: `Operations Command`
 - Data backend: `turso`
 - SMS transport: hosted agent first, local script fallback only in non-production dev
+- Hosted runtime entrypoint: `python scripts/api_server.py`
+- Repo-local health check: `python scripts/doctor.py --deep`
 
 ## Dual-agent deployment
 
@@ -56,9 +58,17 @@ Signature format:
 
 - HMAC-SHA256 over `{timestamp}.{raw_json_body}`
 
+## Repo-local production commands
+
+Run these inside the cloned SunBiz-Agent repo on the operator machine:
+
+1. `python scripts/setup.py`
+2. `python scripts/doctor.py --deep`
+3. `python scripts/api_server.py`
+
 ## Next implementation steps
 
-1. Stand up the hosted Sun Biz agent runtime and wire `SUNBIZ_AGENT_API_URL`.
-2. Replace the temporary shared-shell Supabase fallback readers with a Turso/libSQL adapter for Sun business data.
-3. Add onboarding scripts in this repo for Turso provisioning, credential wiring, and health checks.
+1. Replace the shared-shell fallback readers with a Turso/libSQL adapter for Sun business data.
+2. Add Phase 2 SMS failover (Telnyx + Plivo) behind the existing `sms_engine.py` interface.
+3. Add the deal-lifecycle ledger (`applications -> offers -> funded deals -> renewals`) so Solara's backend roadmap moves from contract to shipped code.
 4. Keep the Sun Biz tenant manifest aligned with the two-agent model above.

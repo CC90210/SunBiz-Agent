@@ -5,7 +5,10 @@
   "private": true,
   "scripts": {
     "setup": "python scripts/setup.py",
-    "health": "echo 'Run /health in your IDE agent'"
+    "doctor": "python scripts/doctor.py",
+    "health": "python scripts/doctor.py",
+    "api": "python scripts/api_server.py",
+    "sms:status": "python scripts/sms_engine.py status --json"
   },
   "dependencies": {},
   "devDependencies": {}

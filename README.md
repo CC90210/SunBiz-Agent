@@ -1,9 +1,9 @@
 # Sun Biz Agent (Solara + Suga Sean)
 
-> A dual-agent operating stack for Sun Biz Funding. Solara runs admin operations in the backend; Suga Sean runs outbound text blasts, email outreach, and meeting-setting in the client-facing lane. Local-first, audit-everything, zero data leaving your machine.
+> A dual-agent operating stack for Sun Biz Funding. Solara runs backend admin operations. Suga Sean runs outbound text blasts, email outreach, reply handling, and meeting-setting. Local-first, audit-everything, zero silent magic.
 
 ```bash
-# Mac / Linux (one-liner)
+# Mac / Linux
 curl -fsSL https://raw.githubusercontent.com/CC90210/CEO-Agent/main/install.sh | bash
 ```
 
@@ -12,153 +12,154 @@ curl -fsSL https://raw.githubusercontent.com/CC90210/CEO-Agent/main/install.sh |
 irm https://raw.githubusercontent.com/CC90210/CEO-Agent/main/install.ps1 | iex
 ```
 
-After the bootstrap finishes:
+After bootstrap:
 
 ```bash
 bravo setup --profile=sunbiz
 ```
 
-One command. Twelve minutes. The wizard asks where your data should live, opens your dashboard to claim a pair code, and hands you a Sun Biz workspace with two cooperating agents: Solara for backend ops and Suga Sean for outreach execution.
+That setup path clones the shared OASIS runtime, pairs the dashboard, and provisions the Sun Biz workspace with both agents enabled.
 
 ---
 
-## What you get (V6.2)
+## What you get
 
-**Sun Biz Agent** works as a two-agent stack inside the **OASIS Agent Command Center** — a dashboard rendered in a "Sun Biz Funding" shell with its own sidebar, branding, and routes. From day one you can:
+Sun Biz Agent runs as a two-agent stack inside the OASIS Agent Command Center:
 
-- **Run the morning lead review** — Solara ranks today's leads by recency × status × renewal proximity and tells you who to call first, in what order, and why.
-- **Send compliant SMS at scale** — Twilio (Phase 1), Telnyx + Plivo failover (Phase 2). Every message ships with "Reply STOP to unsubscribe" hard-coded. Opt-out is enforced at the engine layer — Solara refuses to send to revoked contacts even if you ask.
-- **Run outbound follow-up and meeting-setting** — Suga Sean handles text blast sequencing, email outreach, reply triage, and booking flow handoff so sales follow-up is not trapped in the ops queue.
-- **Track every application end-to-end** — JotForm intake → lender assignment → offer presentation → funded deal → renewal scheduler. Each step emits a `SUNBIZ_*` event into the cross-agent bus so the dashboard updates live.
-- **See real commissions** — funded deals book commission rows the moment money hits. The dashboard renders P&L without you exporting a single CSV.
-- **Invite your team** — owner generates a single-use invite link from `/team`. Loan officers, processors, and read-only viewers each get role-scoped access. Owner machine pairings are trigger-protected; an employee cannot revoke them.
+- **Hosted dashboard transport** via a real FastAPI runtime in this repo.
+- **Compliant SMS delivery** through the Twilio-backed `sms_engine.py`.
+- **Email outreach execution** through the production-grade Gmail blast engine.
+- **JotForm lead intake** through both API pulls and a hosted webhook capture route.
+- **A real setup and doctor path** so the repo can be installed and verified without guesswork.
+- **Dual-agent workspace wiring** so Solara and Suga Sean work inside the same Sun shell.
+
+This repo is now honest about what ships today and what is still Phase 2.
 
 ---
 
 ## The two-agent stack
 
-This build is meant to run **two different agents that work in tandem**:
+This build is meant to run two agents in tandem:
 
-- **Solara ("Solar")** — the backend/admin operator. Owns lead review, lender fit, application flow, funded deals, renewals, commissions, and compliance rails.
-- **Suga Sean** — the front-of-house outreach operator. Owns text blasts, email follow-up, response handling, and meeting-setting.
+- **Solara ("Solar")** owns the backend/admin lane: operational oversight, system-of-record discipline, SMS transport, and the Sun Biz runtime contract.
+- **Suga Sean** owns the outreach lane: text blasts, email follow-up, reply triage, and meeting-setting.
 
-The split matters because ops and outreach move at different speeds. Solara protects the record system; Suga Sean keeps pipeline motion high without muddying the funding ledger.
+The split matters because backend ops and front-of-house outreach move at different speeds. Solara protects the rails. Suga Sean keeps pipeline motion high.
 
 ---
 
-## Data sovereignty — the choice that actually matters
+## Data sovereignty
 
-The setup wizard asks you one question that matters more than any API key:
+The setup wizard asks one important question:
 
-> **Where should your client data live?**
+> **Where should client data live?**
 >
-> 1. **Local Machine (Recommended)** — libSQL file at `~/.bravo/sunbiz.db` on this device. Loan applications, merchant tax IDs, bank-statement uploads, renewal commissions — never leave your hardware.
-> 2. **Cloud (OASIS-hosted Supabase)** — managed multi-tenant, RLS-isolated, OASIS-managed backups.
+> 1. **Local Machine (Recommended)** - libSQL/Turso-local data on the operator machine.
+> 2. **Cloud (OASIS-hosted Supabase)** - managed multi-tenant hosting.
 
-For funding ops, **always pick Local**. The compliance posture is cleaner — if a merchant's lawyer ever asks where their data is, the answer is *"on the broker's premises,"* not *"on a third-party cloud."*
-
-OASIS reads a **pulse** from your machine (a heartbeat that tells us your agent is alive and how it's performing). OASIS cannot read your loan data. That separation is enforced at the schema layer: shared substrate writes to Supabase; tenant business data writes to your libSQL file.
-
-If your Mac Mini ever drops offline, the dashboard tells you within 15 minutes. Nightly Time Machine handles backup. A one-time SQL export-import migrates Local ↔ Cloud if you ever change your mind.
+For funding operations, local is still the recommended default. The shared dashboard should know your machine is alive. It should not need raw merchant records living in a third-party cloud unless the operator explicitly chooses that tradeoff.
 
 ---
 
-## The Mac Mini onboarding (12 minutes)
+## The Mac Mini onboarding
 
-This is the canonical playbook your OASIS operator will walk you through on the kickoff call. Here it is in writing so you can re-run any step solo.
+This is the operator-facing path for the actual client setup.
 
-### Step 1 — Bootstrap (90 seconds)
+### Step 1 - Bootstrap
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/CC90210/CEO-Agent/main/install.sh | bash
 ```
 
-This clones the agent runtime, installs Python 3.10+ / Node 18+ / Git if missing, builds a virtualenv, and drops a `bravo` shim onto your PATH.
+This installs the shared runtime, Python, Node, Git, and the `bravo` shim if needed.
 
-### Step 2 — Launch the wizard with the SunBiz profile preselected
+### Step 2 - Launch the Sun Biz profile
 
 ```bash
 bravo setup --profile=sunbiz
 ```
 
-The wizard walks ~15 steps. The ones that matter for you:
+Important setup answers:
 
-| Step | What it asks | What to type |
+| Step | What it asks | What to use |
 |---|---|---|
-| Identity | Your full name + email | The email you used on the agreement. |
-| Business context | Brand name | **Sun Biz Funding** (exact spelling — this brand string is what routes you to the Sun shell). |
-| AI keys | Anthropic / OpenAI | OASIS supplies these on the shared tier; you supply them on dedicated. |
-| Stripe | Stripe secret key | From your Stripe dashboard → API keys → Restricted, scoped to read-only. |
-| Twilio | Account SID + auth token + sender number | Your existing Twilio account or one OASIS provisioned for you. Confirm the number is **A2P 10DLC registered** (US clients only — unregistered numbers get throttled). |
-| **Data sovereignty** | Local libSQL or Cloud Supabase | **Local.** Non-negotiable for funding ops. |
-| **Dashboard pairing** | Paste 9-char code | See Step 3. |
+| Identity | Name + email | The client operator's real business identity |
+| Brand | Business context | **Sun Biz Funding** |
+| Twilio | SMS credentials | Live Twilio SID, auth token, and sending number |
+| Data sovereignty | Local or cloud | **Local** for production funding ops |
+| Dashboard pairing | 9-char code | Generated from `/settings/devices` |
 
-### Step 3 — Dashboard pairing (60 seconds)
+### Step 3 - Pair the dashboard
 
-The wizard auto-opens your browser to your dashboard's `/settings/devices`. You'll see a button: **"Install Claude Code CLI bridge"**.
+The wizard opens the Devices page, the operator mints the pairing code, and the CLI stores the bridge token after `/api/auth/pair-code/redeem`.
 
-1. Click it. The dashboard mints a single-use 9-character code (`XXX-XXX-XXX`, 15-minute TTL).
-2. Copy the code. Paste it back into the terminal where the wizard is waiting.
-3. The wizard exchanges the code via `/api/auth/pair-code/redeem`, saves a long-lived bridge token to `~/.oasis/bridge_token`, and prints "Bridge token saved."
-
-If the browser doesn't auto-open (headless install, locked-down kiosk), the wizard prints the URL — visit it manually. Set `BRAVO_NO_BROWSER=1` to disable the auto-open entirely.
-
-### Step 4 — Verify (30 seconds)
+### Step 4 - Verify the shared runtime
 
 ```bash
 bravo doctor
 ```
 
-Exit code 0 + verdict `HEALTHY` means you're shipped. Anything else, the doctor names the missing piece (most often a Twilio config or an unverified A2P registration) and you fix it inline.
+That checks the shared OASIS install.
 
-### Step 5 — First chat
+### Step 5 - Verify the Sun Biz runtime itself
 
-Open your dashboard. Click **Agents** in the sidebar. You should see both Solara and Suga Sean available in the workspace switcher. Start with:
+Inside the cloned `SunBiz-Agent` repo:
 
-> *Show me the leads you'd contact today and tell me why.*
+```bash
+python scripts/setup.py
+python scripts/doctor.py --deep
+python scripts/api_server.py
+```
 
-Solara should name specific leads from your CRM, rank them by some combination of recency / status / renewal proximity, and explain the call-order. If the response is vague — *"I would prioritize the most promising leads"* — your data import didn't land; call OASIS support.
+`setup.py` installs the repo dependencies. `doctor.py` verifies the Sun Biz runtime. `api_server.py` starts the hosted API the dashboard contract expects.
+
+---
+
+## Repo-local production commands
+
+Use these when operating the dedicated Sun Biz runtime directly:
+
+```bash
+python scripts/setup.py
+python scripts/doctor.py
+python scripts/doctor.py --deep
+python scripts/api_server.py
+python scripts/sms_engine.py status --json
+```
+
+`bravo doctor` is the shared-platform health check. `python scripts/doctor.py` is the SunBiz-Agent health check.
 
 ---
 
 ## What this repo owns
 
-Sun Biz Agent is a **client product** — separate from OASIS's internal CEO agent. This repo contains:
+Sun Biz Agent is a client product, separate from OASIS's internal CEO agent. This repo contains:
 
-- **Agent identities + routing contract** (`brain/`) — Solara's backend role, the tandem-agent operating model, and Sun Biz-specific rules
-- **Capability registry** (`brain/CAPABILITIES.md`) — every skill + script + integration this agent knows about
-- **Backend runtime** (`scripts/`) — SMS engine, funding intel, deal tracker, renewal scanner, email blast
-- **Dashboard integration contract** (`dashboard/`) — tenant manifest, tandem-agent contract, SMS HMAC contract, event names
-- **Skills** (`skills/`) — operator playbooks the agent loads on demand
+- **Agent identities and routing contract** in `brain/`
+- **Backend runtime** in `scripts/` - setup, doctor, hosted API, SMS engine, email blast engine, JotForm tracker
+- **Dashboard integration contract** in `dashboard/`
+- **Dual-agent product docs** in `docs/`
+- **Skills and operating playbooks** in `skills/`
 
-This repo does **not** contain:
-- The OASIS V6 substrate (state DB, event bus, retrieval index, guard hooks). That lives in [Business-Empire-Agent](https://github.com/CC90210/CEO-Agent) and is the canonical source — Solara consumes it via path lookups, not duplication.
-- The Command Center dashboard chrome (sidebar, agent registry, multi-tenant auth). Same — that's a shared multi-tenant surface in BEA.
+This repo does **not** contain the full shared OASIS substrate. The command center shell, global wizard, pair-code flow, shared state substrate, and shared multi-tenant dashboard live in [Business-Empire-Agent](https://github.com/CC90210/CEO-Agent).
 
 ---
 
-## V6 architecture (how this fits the OASIS substrate)
+## How this fits the OASIS substrate
 
-The Sun Biz Agent runtime is the *agent*. The OASIS substrate is the *operating system*. Three concrete touchpoints:
+The Sun Biz runtime is the agent. OASIS is the operating system around it. The integration points that are live now are:
 
-1. **State** — Solara heartbeats every 15 seconds via `scripts/state_bridge.py` into the shared V6 state DB at `<BEA>/state/empire_state.db` under `agent="sunbiz"`. The dashboard's `/agents` page reads this and the `state_api:8500/status` endpoint.
+1. **Provisioning** - `bravo setup --profile=sunbiz` provisions the Sun workspace and enables both `sunbiz` and `suga_sean`.
+2. **Transport** - `scripts/api_server.py` exposes the hosted API the shared command center calls.
+3. **Events** - `sms_engine.py` emits `SUNBIZ_SMS_SENT`, and the webhook route can emit `SUNBIZ_LEAD_SOURCED`, when the shared Business-Empire-Agent substrate is present beside this repo.
 
-2. **Events** — Solara emits the `SUNBIZ_*` family into the cross-agent event bus:
-   - `SUNBIZ_LEAD_SOURCED` — JotForm / import / manual
-   - `SUNBIZ_SMS_SENT` — payload includes sha256-truncated `to_hash`, never raw phone
-   - `SUNBIZ_APPLICATION_SUBMITTED`, `SUNBIZ_OFFER_PRESENTED`, `SUNBIZ_DEAL_FUNDED`
-   - `SUNBIZ_RENEWAL_DUE` — cron-driven, 30-day window
-   - `SUNBIZ_COMMISSION_BOOKED`, `SUNBIZ_EMAIL_BLAST_DISPATCHED`, `SUNBIZ_SESSION_LOG_APPENDED`
-
-3. **Data** — when the operator picks Local libSQL, the dashboard's `lib/turso-queries.ts` reads `daily_plans`, `leads`, `pipelineBreakdown`, and `streak` from the local file. When they pick Cloud, the same queries hit Supabase. The dispatch is env-driven (`EMPIRE_DATA_BACKEND=turso_local`), set during the wizard's data-sovereignty step.
-
-Full spec: [`brain/AGENTS.md` §19](https://github.com/CC90210/CEO-Agent/blob/main/brain/AGENTS.md) in Business-Empire-Agent.
+The deeper business-data adapter and full deal-lifecycle ledger remain roadmap work, not hidden assumptions.
 
 ---
 
 ## Hosted agent contract
 
-When the Sun Biz operator runs in dedicated mode, the agent exposes a FastAPI service that the dashboard talks to via HMAC.
+When the Sun Biz operator runs in dedicated mode, this repo now exposes:
 
 ```text
 GET  /health
@@ -167,7 +168,7 @@ POST /sms/send
 POST /webhook/jotform
 ```
 
-SMS requests are sent from the Command Center with:
+Dashboard-originated SMS requests look like:
 
 ```json
 {
@@ -178,55 +179,59 @@ SMS requests are sent from the Command Center with:
 }
 ```
 
-If `SUNBIZ_AGENT_HMAC_SECRET` is configured, every request is signed:
+If `SUNBIZ_AGENT_HMAC_SECRET` is configured, requests are validated with:
 
 ```text
 x-oasis-timestamp
-x-oasis-signature: HMAC-SHA256("{timestamp}.{raw_json_body}")
+x-oasis-signature
 x-oasis-tenant-slug
 x-oasis-client-profile
 ```
 
-Replay protection: timestamps older than 60 seconds are rejected.
+Signature format:
+
+- HMAC-SHA256 over `{timestamp}.{raw_json_body}`
+
+Replay protection:
+
+- requests older than 60 seconds are rejected
+
+Launch locally with:
+
+```bash
+python scripts/api_server.py
+```
 
 ---
 
-## Demo mode
+## Production status
 
-The Command Center can show a safe Sun Biz demo *before* a real client account exists. Useful for prospect calls.
+### Shipped now
 
-1. OASIS operator logs into the Command Center.
-2. Open `/demo/sun`.
-3. Shell switches into Sun Biz demo mode with sample leads, renewals, SMS history.
-4. Sidebar shows a demo banner with an exit link.
+- Shared Command Center profile (`sun` shell + dual-agent workspace)
+- Dashboard pairing flow
+- Repo-local setup script
+- Repo-local runtime doctor
+- Hosted FastAPI runtime
+- Twilio-backed SMS engine
+- Gmail outreach engine
+- JotForm lead tracker and webhook capture
+- Dual-agent contract for Solara + Suga Sean
 
-Demo mode does not mutate OASIS's profile, does not show OASIS tenant data, and live SMS sends stay disabled.
+### Still Phase 2 / roadmap
 
----
-
-## Production status (V6.2 Apex)
-
-- ✅ Shared Command Center profile (`sun` shell + SUN_NAV sidebar)
-- ✅ Local SMS engine (Twilio Phase 1)
-- ✅ Demo mode (cookie-driven, no tenant mutation)
-- ✅ Dashboard pairing flow (9-char pair codes, 15-min TTL, single-use)
-- ✅ Data sovereignty wizard step (Local libSQL recommended)
-- ✅ Multi-user team access (invites + roles + owner-pairing protection)
-- ✅ Turso adapters wired for `getTodayPlan`, `recentLeads`, `pipelineBreakdown`, `getStreak`
-- ✅ Verbatim customer-onboarding script + 5-phase deployment runbook (`/playbook`)
-- ⏳ Hosted FastAPI service (Phase 2)
-- ⏳ Turso schema bootstrap (`bravo db init --backend=turso`)
-- ⏳ Telnyx + Plivo SMS failover (Phase 2)
-- ⏳ `funded_deals` table (migration 041, unblocks renewals + P&L Turso reads)
+- Turso business-data adapter for Sun-specific records
+- Telnyx + Plivo SMS failover
+- Full deal-lifecycle ledger (`applications -> offers -> funded deals -> renewals`)
+- Commission / P&L tables for the Solara backend lane
 
 ---
 
 ## Support
 
-- Operator playbook (verbatim): `/playbook/05-customer-onboarding-script` on your dashboard
+- Operator playbook: `/playbook/05-customer-onboarding-script`
 - Deployment runbook: `/playbook/06-sunbiz-runbook`
-- Architecture spec: [`brain/AGENTS.md` §19](https://github.com/CC90210/CEO-Agent/blob/main/brain/AGENTS.md) in Business-Empire-Agent
-- Event contract: [`brain/EVENT_BUS_CONTRACT.md`](https://github.com/CC90210/CEO-Agent/blob/main/brain/EVENT_BUS_CONTRACT.md) in Business-Empire-Agent
+- Event contract: [`brain/EVENT_BUS_CONTRACT.md`](https://github.com/CC90210/CEO-Agent/blob/main/brain/EVENT_BUS_CONTRACT.md)
 - Issues: https://github.com/CC90210/SunBiz-Agent/issues
 
-[MIT licensed](LICENSE) · Built by [Conaugh McKenna](https://oasisai.work) (CC) — founder, [OASIS AI Solutions](https://oasisai.work)
+[MIT licensed](LICENSE) · Built by [Conaugh McKenna](https://oasisai.work) and OASIS AI Solutions

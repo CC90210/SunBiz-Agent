@@ -1,6 +1,6 @@
 {
   "id": "sunbiz-agent",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "tenant_slug": "sun",
   "product_mode": "separate-client-agent",
   "brand": {
@@ -34,9 +34,14 @@
     }
   },
   "services": {
+    "agent_api": {
+      "local_dev_script": "scripts/api_server.py",
+      "health_script": "scripts/doctor.py",
+      "setup_script": "scripts/setup.py"
+    },
     "sms": {
       "hosted_route": "/sms/send",
-      "local_dev_script": "scripts/sms_engine.py",
+      "local_dev_script": "scripts/api_server.py",
       "transport_mode": "hosted-first-dev-fallback"
     }
   },
@@ -55,6 +60,6 @@
     "shared_command_center_shell": "shipped",
     "hosted_agent_transport_contract": "shipped",
     "turso_data_adapter": "pending",
-    "onboarding_pipeline": "pending"
+    "onboarding_pipeline": "shipped"
   }
 }

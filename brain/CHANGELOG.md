@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## V1.2 (Production Hardening) - 2026-05-12
+
+Context: the repo-level setup flow was not yet production-grade. `README.md` and the dashboard contract promised a hosted API, an install path, and a health path, but the actual repo still had legacy marketing-agent scaffolding. This pass makes the shipped runtime real and makes the docs honest about what is live versus still Phase 2.
+
+### Added
+- `scripts/doctor.py` - repo-local production doctor covering env, dependencies, SMS readiness, Gmail/JotForm config, and hosted API security
+- `scripts/api_server.py` - FastAPI hosted surface implementing `GET /health`, `GET /status`, `POST /sms/send`, and `POST /webhook/jotform`
+
+### Changed
+- `scripts/setup.py` rewritten to install from `requirements.txt`, prepare runtime directories, optionally seed `.env.agents`, and run the doctor
+- `.env.agents.template` rewritten around the actual Sun Biz runtime (Twilio, Gmail, JotForm, HMAC, optional lead-gen keys)
+- `package.json` now exposes `doctor`, `health`, `api`, and `sms:status`
+- `requirements.txt` now includes `twilio`, `fastapi`, and `uvicorn`
+- `README.md`, `dashboard/INTEGRATION.md`, `dashboard/tenant.manifest.json`, and entry docs synced to the real shipped runtime
+
+### Notes
+- Hosted SMS transport is now implemented in-repo; HMAC remains fail-closed when `SUNBIZ_AGENT_HMAC_SECRET` is configured
+- The full deal-lifecycle ledger, Turso business-data adapter, and Phase 2 failover providers remain roadmap items, not silent assumptions
+
 ---
 
 ## V1.1 (Dual-Agent Clarification) — 2026-05-12

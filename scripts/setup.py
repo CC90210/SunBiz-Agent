@@ -1,119 +1,106 @@
 """
-Sun Biz Agent Setup Script
-Installs all required Python packages and validates environment.
-(Repositioned 2026-05-11 from Marketing Agent — see brain/CHANGELOG.md)
+Sun Biz Agent setup script.
+
+Installs repo dependencies, prepares local runtime directories, and runs the
+repo-local doctor so the operator sees exactly what is still missing.
 """
 
+from __future__ import annotations
+
+import argparse
+import shutil
 import subprocess
 import sys
-import os
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+REQUIREMENTS_PATH = PROJECT_ROOT / "requirements.txt"
+ENV_PATH = PROJECT_ROOT / ".env.agents"
+ENV_TEMPLATE_PATH = PROJECT_ROOT / ".env.agents.template"
 
 
-def install_packages():
-    """Install required Python packages."""
-    packages = [
-        "google-ads>=29.0.0",      # Google Ads API client
-        "facebook-business>=22.0",  # Meta Marketing API client
-        "google-genai",             # Gemini Imagen image generation
-        "Pillow",                   # Image processing
-        "python-dotenv",            # Environment variable management
-        "requests",                 # HTTP client
-    ]
-
-    print("Installing required packages...")
-    for package in packages:
-        print(f"  Installing {package}...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-
-    print("\nAll packages installed successfully!")
+def ensure_python_version() -> None:
+    if sys.version_info < (3, 10):
+        raise RuntimeError(
+            f"Python 3.10+ required, found {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        )
 
 
-def check_env_file():
-    """Check if .env.agents exists with required variables."""
-    env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env.agents")
-    template_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env.agents.template")
+def install_requirements() -> None:
+    if not REQUIREMENTS_PATH.exists():
+        raise FileNotFoundError(f"requirements.txt missing at {REQUIREMENTS_PATH}")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", str(REQUIREMENTS_PATH)])
 
-    required_vars = {
-        "Google Ads": [
-            "GOOGLE_ADS_DEVELOPER_TOKEN",
-            "GOOGLE_ADS_CLIENT_ID",
-            "GOOGLE_ADS_CLIENT_SECRET",
-            "GOOGLE_ADS_REFRESH_TOKEN",
-            "GOOGLE_ADS_CUSTOMER_ID",
-        ],
-        "Meta Ads": [
-            "META_ACCESS_TOKEN",
-            "META_APP_ID",
-            "META_APP_SECRET",
-            "META_AD_ACCOUNT_ID",
-        ],
-        "Gemini Imagen": [
-            "GEMINI_API_KEY",
-        ],
-    }
 
-    if not os.path.exists(env_path):
-        print(f"\n.env.agents not found at: {env_path}")
-        print(f"Copy the template: cp {template_path} {env_path}")
-        print("Then fill in your actual credentials.")
+def ensure_runtime_dirs() -> None:
+    for relative in ("tmp", "data/email_logs", "data/email_lists"):
+        (PROJECT_ROOT / relative).mkdir(parents=True, exist_ok=True)
+
+
+def maybe_copy_env_template(copy_template: bool) -> bool:
+    if ENV_PATH.exists():
         return False
-
-    # Read existing env file
-    with open(env_path, "r") as f:
-        content = f.read()
-
-    missing = []
-    for platform, vars_list in required_vars.items():
-        for var in vars_list:
-            if var not in content or f"{var}=INSERT" in content:
-                missing.append(f"  [{platform}] {var}")
-
-    if missing:
-        print("\nMissing or unconfigured credentials:")
-        for m in missing:
-            print(m)
+    if not copy_template:
         return False
-
-    print("\nAll credentials configured!")
+    if not ENV_TEMPLATE_PATH.exists():
+        raise FileNotFoundError(f".env.agents.template missing at {ENV_TEMPLATE_PATH}")
+    shutil.copyfile(ENV_TEMPLATE_PATH, ENV_PATH)
     return True
 
 
-def validate_google_ads():
-    """Test Google Ads API connection."""
-    try:
-        from google.ads.googleads.client import GoogleAdsClient
-        print("\ngoogle-ads package: OK")
-    except ImportError:
-        print("\ngoogle-ads package: NOT INSTALLED")
-        return False
-    return True
+def run_doctor(json_output: bool) -> int:
+    command = [sys.executable, str(PROJECT_ROOT / "scripts" / "doctor.py")]
+    if json_output:
+        command.append("--json")
+    return subprocess.call(command)
 
 
-def validate_meta_ads():
-    """Test Meta Marketing API connection."""
-    try:
-        from facebook_business.api import FacebookAdsApi
-        print("facebook-business package: OK")
-    except ImportError:
-        print("facebook-business package: NOT INSTALLED")
-        return False
-    return True
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Install and validate Sun Biz Agent")
+    parser.add_argument(
+        "--copy-env-template",
+        action="store_true",
+        help="Create .env.agents from .env.agents.template if it does not exist",
+    )
+    parser.add_argument(
+        "--doctor-json",
+        action="store_true",
+        help="Run the post-install doctor in JSON mode",
+    )
+    args = parser.parse_args(argv)
+
+    print("=" * 64)
+    print("SUN BIZ AGENT SETUP")
+    print("=" * 64)
+
+    ensure_python_version()
+    print(f"[1/4] Python version OK: {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
+
+    print("[2/4] Installing repo dependencies...")
+    install_requirements()
+
+    print("[3/4] Preparing runtime directories...")
+    ensure_runtime_dirs()
+
+    copied = maybe_copy_env_template(args.copy_env_template)
+    if copied:
+        print("[4/4] Created .env.agents from template. Fill in real credentials before production use.")
+    else:
+        print("[4/4] Environment file left untouched.")
+
+    print("")
+    print("Running Sun Biz doctor...")
+    doctor_exit = run_doctor(args.doctor_json)
+
+    print("")
+    print("Setup complete.")
+    print("Next steps:")
+    print("1. Fill in .env.agents with live Sun Biz credentials if any doctor checks failed.")
+    print("2. Re-run `python scripts/doctor.py --deep` once Twilio, Gmail, and JotForm are wired.")
+    print("3. Start the hosted runtime with `python scripts/api_server.py`.")
+
+    return doctor_exit
 
 
 if __name__ == "__main__":
-    print("=" * 50)
-    print("Sun Biz Agent Setup")
-    print("=" * 50)
-
-    install_packages()
-    print("\n--- Validation ---")
-    validate_google_ads()
-    validate_meta_ads()
-    check_env_file()
-
-    print("\n--- Setup Complete ---")
-    print("Next steps:")
-    print("1. Fill in .env.agents with your API credentials")
-    print("2. Update scripts/google-ads-mcp-wrapper.cmd with credentials")
-    print("3. Update scripts/meta-ads-mcp-wrapper.cmd with credentials")
-    print("4. Run /health to verify everything is connected")
+    raise SystemExit(main())
