@@ -1,0 +1,45 @@
+{
+  "id": "sunbiz-agent",
+  "version": "1.0.0",
+  "tenant_slug": "sun",
+  "product_mode": "separate-client-agent",
+  "brand": {
+    "name": "Sun Biz Funding",
+    "subtitle": "Operations Command"
+  },
+  "command_center": {
+    "profile_id": "sun",
+    "deployment_mode": "dedicated-client-product",
+    "shared_shell_enabled": true,
+    "data_backend": "turso",
+    "nav_contract": "apps/command-center/lib/client-profiles.ts",
+    "dashboard_env": {
+      "agent_api_url": "SUNBIZ_AGENT_API_URL",
+      "agent_hmac_secret": "SUNBIZ_AGENT_HMAC_SECRET"
+    }
+  },
+  "services": {
+    "sms": {
+      "hosted_route": "/sms/send",
+      "local_dev_script": "scripts/sms_engine.py",
+      "transport_mode": "hosted-first-dev-fallback"
+    }
+  },
+  "events_emitted": [
+    "SUNBIZ_SESSION_LOG_APPENDED",
+    "SUNBIZ_LEAD_SOURCED",
+    "SUNBIZ_SMS_SENT",
+    "SUNBIZ_APPLICATION_SUBMITTED",
+    "SUNBIZ_OFFER_PRESENTED",
+    "SUNBIZ_DEAL_FUNDED",
+    "SUNBIZ_RENEWAL_DUE",
+    "SUNBIZ_COMMISSION_BOOKED",
+    "SUNBIZ_EMAIL_BLAST_DISPATCHED"
+  ],
+  "phase_status": {
+    "shared_command_center_shell": "shipped",
+    "hosted_agent_transport_contract": "shipped",
+    "turso_data_adapter": "pending",
+    "onboarding_pipeline": "pending"
+  }
+}
