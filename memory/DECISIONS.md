@@ -2,6 +2,11 @@
 
 ---
 
+### 2026-05-12 — Sun Biz deploys as a tandem workspace, not a single-agent shell
+**Decision:** Treat Sun Biz as a two-agent deployment: `sunbiz` / Solara for backend admin operations and `suga_sean` / Suga Sean for outreach and meeting-setting.
+**Reason:** The client workflow naturally splits into system-of-record ops and high-velocity outbound. Keeping both in one workspace preserves handoff speed without forcing one persona to own contradictory responsibilities.
+**Implementation note:** Command center should keep `primary_agent="sunbiz"` while enabling both agents on the tenant profile.
+
 ### 2026-03-10 — Use Google Ads API (not Google Ad Manager)
 **Decision:** Use Google Ads API for all campaign management
 **Reason:** Google Ad Manager is for publishers (supply side). Google Ads API is for advertisers (demand side) — which is what we need for creating and managing ad campaigns.

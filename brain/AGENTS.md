@@ -4,6 +4,23 @@
 
 ---
 
+## Top-Level Operator Pair
+
+Before routing into the 15 internal sub-agents, treat the Sun Biz deployment itself as a two-operator system:
+
+| Layer | Agent Key | Purpose |
+|---|---|---|
+| Backend ops | `sunbiz` | **Solara / Solar** owns admin operations: lead review, lender routing, applications, funded deals, renewals, commissions, and compliance rails. |
+| Outreach ops | `suga_sean` | **Suga Sean** owns text blasts, email outreach, reply triage, and meeting-setting. |
+
+Rule of thumb:
+
+- If the task touches the source of truth, deal state, lender ops, or compliance, Solara leads.
+- If the task touches outbound motion, follow-up cadence, or booking meetings, Suga Sean leads.
+- If both are involved, Solara protects the ledger and Suga Sean drives the next touch.
+
+---
+
 ## Agent Registry
 
 | # | Agent | File | Role | Model | Trigger |

@@ -1,6 +1,6 @@
-# Sun Biz Agent (Solara)
+# Sun Biz Agent (Solara + Suga Sean)
 
-> The funding-ops backend that runs Sun Biz Funding's day-to-day operations — leads → SMS → applications → funded deals → renewals → commissions. Local-first, audit-everything, zero data leaving your machine.
+> A dual-agent operating stack for Sun Biz Funding. Solara runs admin operations in the backend; Suga Sean runs outbound text blasts, email outreach, and meeting-setting in the client-facing lane. Local-first, audit-everything, zero data leaving your machine.
 
 ```bash
 # Mac / Linux (one-liner)
@@ -18,19 +18,31 @@ After the bootstrap finishes:
 bravo setup --profile=sunbiz
 ```
 
-One command. Twelve minutes. The wizard asks where your data should live, opens your dashboard to claim a pair code, and hands you a Solara chat that already understands your leads, lenders, and renewal schedule.
+One command. Twelve minutes. The wizard asks where your data should live, opens your dashboard to claim a pair code, and hands you a Sun Biz workspace with two cooperating agents: Solara for backend ops and Suga Sean for outreach execution.
 
 ---
 
 ## What you get (V6.2)
 
-**Solara** is the agent. It works inside the **OASIS Agent Command Center** — a dashboard rendered in a "Sun Biz Funding" shell with its own sidebar, branding, and routes. From day one you can:
+**Sun Biz Agent** works as a two-agent stack inside the **OASIS Agent Command Center** — a dashboard rendered in a "Sun Biz Funding" shell with its own sidebar, branding, and routes. From day one you can:
 
 - **Run the morning lead review** — Solara ranks today's leads by recency × status × renewal proximity and tells you who to call first, in what order, and why.
 - **Send compliant SMS at scale** — Twilio (Phase 1), Telnyx + Plivo failover (Phase 2). Every message ships with "Reply STOP to unsubscribe" hard-coded. Opt-out is enforced at the engine layer — Solara refuses to send to revoked contacts even if you ask.
+- **Run outbound follow-up and meeting-setting** — Suga Sean handles text blast sequencing, email outreach, reply triage, and booking flow handoff so sales follow-up is not trapped in the ops queue.
 - **Track every application end-to-end** — JotForm intake → lender assignment → offer presentation → funded deal → renewal scheduler. Each step emits a `SUNBIZ_*` event into the cross-agent bus so the dashboard updates live.
 - **See real commissions** — funded deals book commission rows the moment money hits. The dashboard renders P&L without you exporting a single CSV.
 - **Invite your team** — owner generates a single-use invite link from `/team`. Loan officers, processors, and read-only viewers each get role-scoped access. Owner machine pairings are trigger-protected; an employee cannot revoke them.
+
+---
+
+## The two-agent stack
+
+This build is meant to run **two different agents that work in tandem**:
+
+- **Solara ("Solar")** — the backend/admin operator. Owns lead review, lender fit, application flow, funded deals, renewals, commissions, and compliance rails.
+- **Suga Sean** — the front-of-house outreach operator. Owns text blasts, email follow-up, response handling, and meeting-setting.
+
+The split matters because ops and outreach move at different speeds. Solara protects the record system; Suga Sean keeps pipeline motion high without muddying the funding ledger.
 
 ---
 
@@ -101,7 +113,7 @@ Exit code 0 + verdict `HEALTHY` means you're shipped. Anything else, the doctor 
 
 ### Step 5 — First chat
 
-Open your dashboard. Click **Agents** in the sidebar. Type:
+Open your dashboard. Click **Agents** in the sidebar. You should see both Solara and Suga Sean available in the workspace switcher. Start with:
 
 > *Show me the leads you'd contact today and tell me why.*
 
@@ -113,10 +125,10 @@ Solara should name specific leads from your CRM, rank them by some combination o
 
 Sun Biz Agent is a **client product** — separate from OASIS's internal CEO agent. This repo contains:
 
-- **Agent identity** (`brain/SOUL.md`) — Solara's operating values + non-negotiable behavior
+- **Agent identities + routing contract** (`brain/`) — Solara's backend role, the tandem-agent operating model, and Sun Biz-specific rules
 - **Capability registry** (`brain/CAPABILITIES.md`) — every skill + script + integration this agent knows about
 - **Backend runtime** (`scripts/`) — SMS engine, funding intel, deal tracker, renewal scanner, email blast
-- **Dashboard integration contract** (`dashboard/`) — tenant manifest, SMS HMAC contract, event names
+- **Dashboard integration contract** (`dashboard/`) — tenant manifest, tandem-agent contract, SMS HMAC contract, event names
 - **Skills** (`skills/`) — operator playbooks the agent loads on demand
 
 This repo does **not** contain:

@@ -2,6 +2,21 @@
 
 ---
 
+## V1.1 (Dual-Agent Clarification) — 2026-05-12
+
+Context: the live GitHub repo correctly contained the Sun Biz runtime, but the product documentation still read like a Solara-only system. The intended build is a tandem deployment: Solara for backend admin operations, Suga Sean for outreach and meeting-setting.
+
+### Changed
+- `README.md` now describes the two-agent operating model explicitly
+- `dashboard/tenant.manifest.json` now records the paired-agent contract (`sunbiz` + `suga_sean`)
+- `dashboard/INTEGRATION.md` now states that Sun tenants should provision with both agents enabled while keeping `primary_agent="sunbiz"`
+- `brain/AGENTS.md` now starts with the top-level Solara/Suga Sean split before dropping into internal sub-agent routing
+
+### Notes
+- This is a product-contract clarification and GitHub sync, not a rebrand
+- Solara remains the primary system-of-record agent
+- Suga Sean remains the outreach operator layered on top of the same Sun Biz workspace
+
 ## V1.0 (Sun Biz Agent) — 2026-05-11
 
 **Major Release — Repositioning from "AdVantage V2.0 — AI Marketing Director" to "Sun Biz Agent V1.0 — Full Backend Operations Agent"**

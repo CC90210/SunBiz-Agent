@@ -18,6 +18,15 @@ This folder is the contract between the Sun Biz Agent repo and the shared Agent 
 - Data backend: `turso`
 - SMS transport: hosted agent first, local script fallback only in non-production dev
 
+## Dual-agent deployment
+
+Sun Biz is intended to provision as a two-agent workspace:
+
+- `sunbiz` / **Solara**: backend admin operations, deal lifecycle, renewals, commissions
+- `suga_sean` / **Suga Sean**: text blasts, email outreach, reply handling, meeting-setting
+
+The command center should keep `primary_agent="sunbiz"` so Solara anchors the record system, while `agents_enabled` includes both `sunbiz` and `suga_sean` so the operator can switch between them in the `/agent` view.
+
 ## Dashboard env vars
 
 Set these on the command-center deployment that will call the Sun Biz backend:
@@ -52,4 +61,4 @@ Signature format:
 1. Stand up the hosted Sun Biz agent runtime and wire `SUNBIZ_AGENT_API_URL`.
 2. Replace the temporary shared-shell Supabase fallback readers with a Turso/libSQL adapter for Sun business data.
 3. Add onboarding scripts in this repo for Turso provisioning, credential wiring, and health checks.
-4. Push to `CC90210/SunBiz-Agent` only after CC approves the remote state and deployment target.
+4. Keep the Sun Biz tenant manifest aligned with the two-agent model above.

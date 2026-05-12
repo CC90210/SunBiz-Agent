@@ -7,11 +7,26 @@
     "name": "Sun Biz Funding",
     "subtitle": "Operations Command"
   },
+  "agent_stack": {
+    "primary_agent": {
+      "key": "sunbiz",
+      "label": "Solara",
+      "nickname": "Solar",
+      "responsibility": "admin operations, deal lifecycle, renewals, commissions"
+    },
+    "secondary_agent": {
+      "key": "suga_sean",
+      "label": "Suga Sean",
+      "responsibility": "text blasts, email outreach, reply triage, meeting-setting"
+    }
+  },
   "command_center": {
     "profile_id": "sun",
     "deployment_mode": "dedicated-client-product",
     "shared_shell_enabled": true,
     "data_backend": "turso",
+    "primary_agent": "sunbiz",
+    "enabled_agents": ["sunbiz", "suga_sean"],
     "nav_contract": "apps/command-center/lib/client-profiles.ts",
     "dashboard_env": {
       "agent_api_url": "SUNBIZ_AGENT_API_URL",
