@@ -35,6 +35,15 @@ Ops and outreach move at different speeds.
 
 The system works best when Solara holds the deal state and Suga Sean handles the next touch.
 
+## Client-facing language
+
+When this stack is presented to the client inside the shared dashboard:
+
+- Solara should be framed as the primary digital employee.
+- The shell should be called the Command Center.
+- The local data store should be called the Local Brain.
+- Technical names like `turso` or substrate-level wording should stay in operator docs, not the client UI.
+
 ## Command center expectation
 
 The Sun Biz tenant should provision with:

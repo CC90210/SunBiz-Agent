@@ -2,7 +2,8 @@
 Sun Biz Agent setup script.
 
 Installs repo dependencies, prepares local runtime directories, and runs the
-repo-local doctor so the operator sees exactly what is still missing.
+repo-local doctor so the operator gets a clean "digital employee" onboarding
+flow instead of raw infrastructure steps.
 """
 
 from __future__ import annotations
@@ -70,33 +71,33 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     print("=" * 64)
-    print("SUN BIZ AGENT SETUP")
+    print("ONBOARDING YOUR NEW DIGITAL EMPLOYEE, SOLARA")
     print("=" * 64)
 
     ensure_python_version()
-    print(f"[1/4] Python version OK: {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
+    print(f"[1/4] Solara's runtime is ready: Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
 
-    print("[2/4] Installing repo dependencies...")
+    print("[2/4] Installing Solara's working tools...")
     install_requirements()
 
-    print("[3/4] Preparing runtime directories...")
+    print("[3/4] Preparing Solara's local workspace...")
     ensure_runtime_dirs()
 
     copied = maybe_copy_env_template(args.copy_env_template)
     if copied:
-        print("[4/4] Created .env.agents from template. Fill in real credentials before production use.")
+        print("[4/4] Created the credentials template. Add real JotForm, Text Torrent, and email credentials before production use.")
     else:
-        print("[4/4] Environment file left untouched.")
+        print("[4/4] Existing credentials file left untouched.")
 
     print("")
-    print("Running Sun Biz doctor...")
+    print("Running Solara pulse check...")
     doctor_exit = run_doctor(args.doctor_json)
 
     print("")
-    print("Setup complete.")
+    print("Onboarding complete.")
     print("Next steps:")
-    print("1. Fill in .env.agents with live Sun Biz credentials if any doctor checks failed.")
-    print("2. Re-run `python scripts/doctor.py --deep` once Twilio, Gmail, and JotForm are wired.")
+    print("1. Add live JotForm, Text Torrent, and email credentials if any pulse checks failed.")
+    print("2. Re-run `python scripts/doctor.py --deep` once those connections are wired.")
     print("3. Start the hosted runtime with `python scripts/api_server.py`.")
 
     return doctor_exit

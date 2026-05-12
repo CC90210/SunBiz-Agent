@@ -35,6 +35,22 @@ ENV_TEMPLATE_PATH = PROJECT_ROOT / ".env.agents.template"
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
 
+FRIENDLY_CHECK_NAMES = {
+    "python_version": "Solara runtime",
+    "env_template": "Credentials template",
+    "env_file": "Credentials file",
+    "repo_surface": "Runtime files",
+    "sms_phase1_env": "Text Torrent credentials",
+    "gmail_env": "Email credentials",
+    "jotform_env": "JotForm credentials",
+    "api_security_env": "Hosted API signing secret",
+    "sms_phase2_failover_env": "Phase 2 SMS failover",
+    "leadgen_env": "Optional lead-gen keys",
+    "sms_engine": "SMS transport",
+    "gmail_live": "Live Gmail connection",
+    "jotform_live": "Live JotForm connection",
+}
+
 
 @dataclass
 class Check:
@@ -348,7 +364,7 @@ def build_report(*, include_live_checks: bool = False) -> dict:
 
 def print_human(report: dict) -> None:
     print("=" * 64)
-    print("SUN BIZ AGENT DOCTOR")
+    print("SOLARA PULSE CHECK")
     print("=" * 64)
     print(f"Verdict    : {report['verdict']}")
     print(f"Checked at : {report['checked_at']}")
@@ -361,7 +377,8 @@ def print_human(report: dict) -> None:
             "fail": "[FAIL]",
         }[check["status"]]
         scope = "required" if check["required"] else "optional"
-        print(f"{marker} {check['name']} ({scope})")
+        label = FRIENDLY_CHECK_NAMES.get(check["name"], check["name"])
+        print(f"{marker} {label} ({scope})")
         print(f"       {check['detail']}")
     print("")
     summary = report["summary"]

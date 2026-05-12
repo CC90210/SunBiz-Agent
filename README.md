@@ -1,6 +1,6 @@
 # Sun Biz Agent (Solara + Suga Sean)
 
-> A dual-agent operating stack for Sun Biz Funding. Solara runs backend admin operations. Suga Sean runs outbound text blasts, email outreach, reply handling, and meeting-setting. Local-first, audit-everything, zero silent magic.
+> A digital-employee operating stack for Sun Biz Funding. Solara is the lead digital employee inside the client's Command Center. Suga Sean keeps outreach moving. Local-first, audit-everything, zero silent magic.
 
 ```bash
 # Mac / Linux
@@ -18,50 +18,52 @@ After bootstrap:
 bravo setup --profile=sunbiz
 ```
 
-That setup path clones the shared OASIS runtime, pairs the dashboard, and provisions the Sun Biz workspace with both agents enabled.
+That setup path now onboards Solara like a digital employee: it pairs the Command Center, walks the operator through JotForm and Text Torrent credentials in plain English, sets up Solara's Local Brain, and provisions the Sun Biz workspace with both agents enabled.
 
 ---
 
-## What you get
+## What the client experiences
 
-Sun Biz Agent runs as a two-agent stack inside the OASIS Agent Command Center:
+Sun Biz Agent runs as a two-agent stack inside the OASIS Agent Command Center, but the client should experience it as one clean digital employee handoff:
 
-- **Hosted dashboard transport** via a real FastAPI runtime in this repo.
-- **Compliant SMS delivery** through the Twilio-backed `sms_engine.py`.
-- **Email outreach execution** through the production-grade Gmail blast engine.
-- **JotForm lead intake** through both API pulls and a hosted webhook capture route.
-- **A real setup and doctor path** so the repo can be installed and verified without guesswork.
-- **Dual-agent workspace wiring** so Solara and Suga Sean work inside the same Sun shell.
+- **Conversational onboarding** through `bravo setup --profile=sunbiz`, framed as onboarding Solara instead of installing infrastructure.
+- **Plain-English credential handoff** for JotForm and Text Torrent, followed by a live pulse check once credentials are saved.
+- **Welcome to your Command Center** as the first post-pairing landing page.
+- **Unified Onboarding Manual** front-and-center so the client knows how to work with Solara on day one.
+- **Proactive Solara greeting** in chat: once JotForm is healthy, Solara opens by saying she is connected and ready to process the funding pipeline.
+- **Hosted dashboard transport** via a real FastAPI runtime in this repo, with SMS, email, and JotForm intake behind the scenes.
 
-This repo is now honest about what ships today and what is still Phase 2.
+This repo is now honest about what ships today, what the client should see, and what is still Phase 2.
 
 ---
 
-## The two-agent stack
+## Behind the scenes
 
 This build is meant to run two agents in tandem:
 
 - **Solara ("Solar")** owns the backend/admin lane: operational oversight, system-of-record discipline, SMS transport, and the Sun Biz runtime contract.
 - **Suga Sean** owns the outreach lane: text blasts, email follow-up, reply triage, and meeting-setting.
 
-The split matters because backend ops and front-of-house outreach move at different speeds. Solara protects the rails. Suga Sean keeps pipeline motion high.
+The split matters because backend ops and front-of-house outreach move at different speeds. Solara protects the rails. Suga Sean keeps pipeline motion high. Client-facing copy should still treat Solara as the primary digital employee and keep technical split details in the background unless the operator needs them.
 
 ---
 
-## Data sovereignty
+## Local Brain
 
 The setup wizard asks one important question:
 
-> **Where should client data live?**
+> **Where should Solara's Local Brain live?**
 >
-> 1. **Local Machine (Recommended)** - libSQL/Turso-local data on the operator machine.
+> 1. **Local Machine (Recommended)** - Solara's Local Brain stays on the operator machine.
 > 2. **Cloud (OASIS-hosted Supabase)** - managed multi-tenant hosting.
 
 For funding operations, local is still the recommended default. The shared dashboard should know your machine is alive. It should not need raw merchant records living in a third-party cloud unless the operator explicitly chooses that tradeoff.
 
+Internal note for builders: the current adapter key is still `turso` / libSQL in the shared OASIS runtime. Client-facing copy should say **Local Brain**.
+
 ---
 
-## The Mac Mini onboarding
+## The Digital Employee onboarding
 
 This is the operator-facing path for the actual client setup.
 
@@ -73,7 +75,7 @@ curl -fsSL https://raw.githubusercontent.com/CC90210/CEO-Agent/main/install.sh |
 
 This installs the shared runtime, Python, Node, Git, and the `bravo` shim if needed.
 
-### Step 2 - Launch the Sun Biz profile
+### Step 2 - Launch Solara's onboarding
 
 ```bash
 bravo setup --profile=sunbiz
@@ -85,11 +87,18 @@ Important setup answers:
 |---|---|---|
 | Identity | Name + email | The client operator's real business identity |
 | Brand | Business context | **Sun Biz Funding** |
-| Twilio | SMS credentials | Live Twilio SID, auth token, and sending number |
-| Data sovereignty | Local or cloud | **Local** for production funding ops |
+| Text Torrent | SMS credentials | Live Twilio SID, auth token, and sending number |
+| Local Brain | Local or cloud | **Local** for production funding ops |
 | Dashboard pairing | 9-char code | Generated from `/settings/devices` |
 
-### Step 3 - Pair the dashboard
+Expected wizard moments:
+
+- "Onboarding your new agent, Solara..."
+- "Setting up Solara's Local Brain..."
+- "Checking Solara's pulse..."
+- "Solara is connected to JotForm. She is ready to receive leads."
+
+### Step 3 - Pair the Command Center
 
 The wizard opens the Devices page, the operator mints the pairing code, and the CLI stores the bridge token after `/api/auth/pair-code/redeem`.
 
@@ -101,7 +110,7 @@ bravo doctor
 
 That checks the shared OASIS install.
 
-### Step 5 - Verify the Sun Biz runtime itself
+### Step 5 - Pulse check Solara's tools
 
 Inside the cloned `SunBiz-Agent` repo:
 
@@ -112,6 +121,13 @@ python scripts/api_server.py
 ```
 
 `setup.py` installs the repo dependencies. `doctor.py` verifies the Sun Biz runtime. `api_server.py` starts the hosted API the dashboard contract expects.
+
+When the shared Command Center is live, the client should land on:
+
+- `Welcome to your Command Center`
+- `Unified Onboarding Manual`
+- Solara's chat welcome
+- JotForm, Text Torrent, and Local Brain health states
 
 ---
 
@@ -140,6 +156,11 @@ Sun Biz Agent is a client product, separate from OASIS's internal CEO agent. Thi
 - **Dashboard integration contract** in `dashboard/`
 - **Dual-agent product docs** in `docs/`
 - **Skills and operating playbooks** in `skills/`
+
+For the client-facing Command Center experience, see:
+
+- [`docs/UNIFIED_ONBOARDING_MANUAL.md`](docs/UNIFIED_ONBOARDING_MANUAL.md)
+- [`dashboard/INTEGRATION.md`](dashboard/INTEGRATION.md)
 
 This repo does **not** contain the full shared OASIS substrate. The command center shell, global wizard, pair-code flow, shared state substrate, and shared multi-tenant dashboard live in [Business-Empire-Agent](https://github.com/CC90210/CEO-Agent).
 
@@ -229,6 +250,7 @@ python scripts/api_server.py
 
 ## Support
 
+- Unified onboarding manual: [`docs/UNIFIED_ONBOARDING_MANUAL.md`](docs/UNIFIED_ONBOARDING_MANUAL.md)
 - Operator playbook: `/playbook/05-customer-onboarding-script`
 - Deployment runbook: `/playbook/06-sunbiz-runbook`
 - Event contract: [`brain/EVENT_BUS_CONTRACT.md`](https://github.com/CC90210/CEO-Agent/blob/main/brain/EVENT_BUS_CONTRACT.md)

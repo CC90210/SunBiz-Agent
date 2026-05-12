@@ -1,23 +1,23 @@
 {
   "id": "sunbiz-agent",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "tenant_slug": "sun",
   "product_mode": "separate-client-agent",
   "brand": {
     "name": "Sun Biz Funding",
-    "subtitle": "Operations Command"
+    "subtitle": "Command Center"
   },
   "agent_stack": {
     "primary_agent": {
       "key": "sunbiz",
       "label": "Solara",
       "nickname": "Solar",
-      "responsibility": "admin operations, deal lifecycle, renewals, commissions"
+      "responsibility": "primary digital employee for lead intake, applications, offers, funded deals, and renewals"
     },
     "secondary_agent": {
       "key": "suga_sean",
       "label": "Suga Sean",
-      "responsibility": "text blasts, email outreach, reply triage, meeting-setting"
+      "responsibility": "outreach specialist for text blasts, email follow-up, reply triage, and meeting-setting"
     }
   },
   "command_center": {
@@ -25,6 +25,7 @@
     "deployment_mode": "dedicated-client-product",
     "shared_shell_enabled": true,
     "data_backend": "turso",
+    "data_backend_label": "Local Brain",
     "primary_agent": "sunbiz",
     "enabled_agents": ["sunbiz", "suga_sean"],
     "nav_contract": "apps/command-center/lib/client-profiles.ts",
@@ -32,6 +33,13 @@
       "agent_api_url": "SUNBIZ_AGENT_API_URL",
       "agent_hmac_secret": "SUNBIZ_AGENT_HMAC_SECRET"
     }
+  },
+  "experience_layer": {
+    "wizard_headline": "Onboarding your new digital employee, Solara",
+    "local_brain_label": "Local Brain",
+    "landing_title": "Welcome to your Command Center",
+    "playbook_title": "Unified Onboarding Manual",
+    "chat_greeting_template": "Hello {first_name}, I'm Solara. I've successfully connected to your JotForm and I'm ready to begin processing your funding pipeline."
   },
   "services": {
     "agent_api": {
@@ -59,6 +67,7 @@
   "phase_status": {
     "shared_command_center_shell": "shipped",
     "hosted_agent_transport_contract": "shipped",
+    "experience_layer": "shipped",
     "turso_data_adapter": "pending",
     "onboarding_pipeline": "shipped"
   }

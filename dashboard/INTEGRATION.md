@@ -1,11 +1,11 @@
-# Sun Biz Agent Dashboard Integration
+# Sun Biz Command Center Experience Contract
 
 This folder is the contract between the Sun Biz Agent repo and the shared Agent Command Center.
 
 ## Current architecture
 
 - Sun Biz Agent is a separate client product, not a permanent row-level tenant inside CC's internal ops app.
-- Client operational data is Turso/libSQL-first.
+- Client operational data is Local Brain-first. Internally, the shared adapter still uses the `turso` / libSQL key.
 - The shared Agent Command Center renders the Sun profile/sidebar shell while the dedicated runtime lives in this repo.
 - Shared infra can stay in Business-Empire-Agent where it adds leverage: V6 state sync, event bus registration, dashboard chrome, and onboarding rails.
 
@@ -14,11 +14,28 @@ This folder is the contract between the Sun Biz Agent repo and the shared Agent 
 - Profile id: `sun`
 - Tenant slug: `sun`
 - Brand: `Sun Biz Funding`
-- Subtitle: `Operations Command`
-- Data backend: `turso`
+- Subtitle: `Command Center`
+- Landing page headline: `Welcome to your Command Center`
+- Primary playbook card: `Unified Onboarding Manual`
+- Client label for data backend: `Local Brain`
+- Internal backend key: `turso`
 - SMS transport: hosted agent first, local script fallback only in non-production dev
 - Hosted runtime entrypoint: `python scripts/api_server.py`
 - Repo-local health check: `python scripts/doctor.py --deep`
+
+## Client-facing copy rules
+
+- Treat Solara as the primary digital employee.
+- Use `Command Center`, `Local Brain`, and `Automation`.
+- Do not surface `Turso`, `Dispatch`, or `Substrate` in client-facing UI copy.
+- Treat `Text Torrent` as the SMS credential handoff label, even though the transport remains Twilio-backed under the hood.
+
+## Dashboard handoff expectations
+
+- After pairing, the operator should land on the Sun home view, not a generic agent list.
+- The first thing they should see is `Welcome to your Command Center`.
+- The Playbook tab should foreground the `Unified Onboarding Manual`.
+- The agent chat should greet the user as Solara and mention live JotForm readiness once the integration is healthy.
 
 ## Dual-agent deployment
 
@@ -28,6 +45,13 @@ Sun Biz is intended to provision as a two-agent workspace:
 - `suga_sean` / **Suga Sean**: text blasts, email outreach, reply handling, meeting-setting
 
 The command center should keep `primary_agent="sunbiz"` so Solara anchors the record system, while `agents_enabled` includes both `sunbiz` and `suga_sean` so the operator can switch between them in the `/agent` view.
+
+## Expected pulse checks
+
+- JotForm: Solara is connected and ready to receive leads
+- Text Torrent: Solara can send and receive SMS follow-up
+- Local Brain: Solara can read the tenant's local operating data
+- Automation: the hosted runtime is online and responding
 
 ## Dashboard env vars
 
@@ -68,7 +92,7 @@ Run these inside the cloned SunBiz-Agent repo on the operator machine:
 
 ## Next implementation steps
 
-1. Replace the shared-shell fallback readers with a Turso/libSQL adapter for Sun business data.
+1. Replace the shared-shell fallback readers with a Local Brain adapter for Sun business data.
 2. Add Phase 2 SMS failover (Telnyx + Plivo) behind the existing `sms_engine.py` interface.
 3. Add the deal-lifecycle ledger (`applications -> offers -> funded deals -> renewals`) so Solara's backend roadmap moves from contract to shipped code.
 4. Keep the Sun Biz tenant manifest aligned with the two-agent model above.
