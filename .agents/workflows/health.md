@@ -4,7 +4,7 @@ description: Full system diagnostic — API connectivity, token validity, campai
 
 // turbo-all
 
-# /health — System Health Diagnostic
+# /health — Sun Biz Agent System Health Diagnostic
 
 ## When to Use
 Use `/health` at session start, when something seems off, or for routine checks.
@@ -30,7 +30,7 @@ Use `/health` at session start, when something seems off, or for routine checks.
 
 7. **Report:**
    ```
-   === AdVantage Health Report ===
+   === Sun Biz Agent Health Report ===
    APIs:        [OK/FAIL] Google | [OK/FAIL] Meta
    Tokens:      [OK/WARN] Valid
    MCP:         X/6 operational

@@ -1,6 +1,7 @@
 # CAPABILITIES — Complete Tool Inventory
 
-> All tools available to AdVantage across all interfaces.
+> All tools available to Sun Biz Agent across all interfaces.
+> *Repositioned 2026-05-11: scope expanded from "AdVantage — Marketing Director (Meta + Google Ads only)" to "Sun Biz Agent — Full Backend Operations Agent". The 8 MCP servers + Python SDKs below remain — they now cover the lead-gen sub-capability while new CLI scripts (sms_engine, funding_intel, deal_tracker, renewal_scanner, state_bridge) drive ops.*
 
 ---
 

@@ -54,3 +54,6 @@ memory/ARCHIVES/*.gz
 data/email_lists/*.csv
 !data/email_lists/sample_recipients.csv
 data/email_logs/
+
+# Sun Biz Agent — local logs (SMS sends, scratch artifacts)
+tmp/

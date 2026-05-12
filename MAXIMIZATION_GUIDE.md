@@ -1,6 +1,7 @@
-# MAXIMIZATION GUIDE — SunBiz Funding x AdVantage
+# MAXIMIZATION GUIDE — Sun Biz Funding × Sun Biz Agent
+*(Repositioned 2026-05-11 from "SunBiz Funding × AdVantage" — see `brain/CHANGELOG.md`. Scope expanded from "AI marketing system" to full backend operations agent: SMS, email, deal lifecycle, funding intelligence, commissions.)*
 
-> Your playbook for using the AI marketing system. Copy-paste these prompts.
+> Your playbook for using the Sun Biz Agent system. Copy-paste these prompts.
 
 ---
 

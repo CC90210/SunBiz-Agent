@@ -1,6 +1,7 @@
 """
-Marketing Agent Setup Script
+Sun Biz Agent Setup Script
 Installs all required Python packages and validates environment.
+(Repositioned 2026-05-11 from Marketing Agent — see brain/CHANGELOG.md)
 """
 
 import subprocess
@@ -101,7 +102,7 @@ def validate_meta_ads():
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("Marketing Agent Setup")
+    print("Sun Biz Agent Setup")
     print("=" * 50)
 
     install_packages()

@@ -2,6 +2,71 @@
 
 ---
 
+## V1.0 (Sun Biz Agent) — 2026-05-11
+
+**Major Release — Repositioning from "AdVantage V2.0 — AI Marketing Director" to "Sun Biz Agent V1.0 — Full Backend Operations Agent"**
+
+Context: Client (Sun Biz Funding) coming out of a high-stakes pitch; CC is delivering a personalized AI operations system as the differentiator. Scope expanding from "ads only" to "full backend operations" — outbound SMS (Twilio Phase 1, Telnyx + Plivo failover Phase 2), high-volume email blasts, deal lifecycle (application → offer → funded → renewal), funding intelligence (factor rates, commission math, TAR-band classification), lender CRM, CSV lead import. Meta Ads + Google Ads engines preserved as lead-gen sub-capabilities under the new umbrella.
+
+### Changed (BREAKING)
+- **Identity:** "AdVantage V2.0 — AI Marketing Director" → **"Sun Biz Agent V1.0 — Full Backend Operations Agent"**
+- **package.json `name`:** `marketing-agent` → `sun-biz-agent`
+- **package.json `description`:** updated to reflect ops scope (SMS, email blasts, deal lifecycle, funding intel, commissions)
+- **CLAUDE.md:** Fully rewritten — new identity, new tool-routing table (CLI-first with sms_engine.py at the top), new compliance section (TCPA for SMS), new workflow command list (/sms-blast, /deal-status, /renewal-scan, /commission-report)
+- **ANTIGRAVITY.md:** Mirror of CLAUDE.md changes for the Gemini/Antigravity runtime
+- **brain/SOUL.md:** Rewritten under explicit user direction (sanctioned mission-pivot — see top of file for "Amended 2026-05-11" note; this is not a self-modification of an IMMUTABLE file, it is a CC-authorized re-scoping)
+- **brain/CAPABILITIES.md:** Header annotated with scope expansion note
+- **First-message greeting:** "AdVantage online." → "Sun Biz Agent online."
+- **Git commit prefix:** `advantage:` → `sunbiz:`
+
+### Added
+- **V6 substrate registration** (in sibling Business-Empire-Agent repo):
+  - `scripts/state_manager.py::VALID_AGENTS` gained `"sunbiz"`
+  - `scripts/state_manager.py::_emit_cross_agent_event()` refactored to accept `source` parameter (default `"bravo"` for backwards compat); session_log emits are now agent-templated (`f"{agent.upper()}_SESSION_LOG_APPENDED"`)
+  - `scripts/agent_heartbeat.py::VALID_AGENTS` gained `"sunbiz"` (Supabase mirror)
+  - `brain/EVENT_BUS_CONTRACT.md` registry: 9 new `SUNBIZ_*` event types (LEAD_SOURCED, SMS_SENT, APPLICATION_SUBMITTED, OFFER_PRESENTED, DEAL_FUNDED, RENEWAL_DUE, COMMISSION_BOOKED, EMAIL_BLAST_DISPATCHED, SESSION_LOG_APPENDED)
+  - `brain/AGENTS.md` §19: Sun Biz Agent registered as a tenant-scoped operations agent alongside Atlas/Maven
+- **Compliance:** TCPA section added for outbound SMS (consent check at send time, stop-keyword auto-suppression, quiet-hours enforcement)
+
+### Preserved (functional, unchanged)
+- All 16 sub-agents in `agents/` — ads agents now serve the lead-gen sub-capability
+- All 19 skills in `skills/`
+- `scripts/email_blast.py` (Gmail SMTP, thread-safe, CAN-SPAM) — flagship outreach engine
+- `scripts/google_ads_engine.py` + `scripts/meta_ads_engine.py` — lead-gen sub-capability
+- 6 HTML email templates in `templates/email/`
+- All MCP server wiring (Playwright, Context7, Memory, Sequential Thinking, n8n, Late, plus pending Google/Meta Ads MCPs)
+- `brain/CLIENT.md` (Sun Biz Funding ICP profile — same client, same domain)
+
+### Operator follow-up: `.env.agents` additions (Phase 1)
+The `.env.agents.template` file is file-guarded from agent edits. Paste this block into `.env.agents` (and the safe template version into `.env.agents.template`) with real values from Sun's Twilio console before the first `/sms-blast`:
+
+```
+# Sun Biz Agent — SMS (Phase 1: Twilio)
+SUNBIZ_TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+SUNBIZ_TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+SUNBIZ_TWILIO_FROM_NUMBER=+1XXXXXXXXXX
+
+# Sun Biz Agent — SMS (Phase 2: failover providers)
+# SUNBIZ_TELNYX_API_KEY=KEYxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# SUNBIZ_TELNYX_FROM_NUMBER=+1XXXXXXXXXX
+# SUNBIZ_PLIVO_AUTH_ID=MAxxxxxxxxxxxxxxxxxxxx
+# SUNBIZ_PLIVO_AUTH_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# SUNBIZ_PLIVO_FROM_NUMBER=+1XXXXXXXXXX
+```
+
+Once added, `python scripts/sms_engine.py status --json` will show twilio in `providers_configured`, and `pip install twilio` flips `twilio_sdk_installed` to true.
+
+### Coming Phase 2 (this week)
+- `scripts/sms_engine.py` — multi-provider failover (Twilio → Telnyx → Plivo)
+- `scripts/funding_intel.py` — factor-rate lookup, commission math, TAR-band classifier
+- `scripts/deal_tracker.py` — application/offer/funded/renewal lifecycle helpers
+- `scripts/renewal_scanner.py` — nightly cron (30-day window)
+- `scripts/state_bridge.py` — V6 heartbeat daemon (PM2)
+- New skills: sms-outbound, deal-lifecycle, funding-intel, commission-tracking, lender-crm
+- Dashboard: tenant-scoped sidebar at `agent-dashboard-cc90210.vercel.app` for Sun-tenant logins
+
+---
+
 ## V2.0 — 2026-03-10
 **Major Release — SunBiz Funding Identity & MCA Pivot**
 

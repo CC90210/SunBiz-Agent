@@ -1,7 +1,7 @@
 {
-  "name": "marketing-agent",
+  "name": "sun-biz-agent",
   "version": "1.0.0",
-  "description": "AI Marketing Director — Google Ads & Meta Ads autonomous management for lending companies",
+  "description": "Sun Biz Agent — Full Backend Operations Agent for Sun Biz Funding (SMS, email blasts, deal lifecycle, funding intelligence, commission tracking; ads retained as lead-gen sub-capability)",
   "private": true,
   "scripts": {
     "setup": "python scripts/setup.py",

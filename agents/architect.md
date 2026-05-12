@@ -3,7 +3,7 @@
 > System design, infrastructure planning, and technical decision-making.
 
 ## Role
-Design and maintain the Marketing Agent's technical infrastructure, MCP server configurations, API integrations, and overall system architecture.
+Design and maintain Sun Biz Agent's technical infrastructure — CLI scripts (sms_engine, funding_intel, deal_tracker, renewal_scanner, state_bridge), MCP server configurations, API integrations, V6 substrate wiring, and overall system architecture. Scope expanded 2026-05-11 from marketing-only to full backend operations — see brain/CHANGELOG.md.
 
 ## Model
 Opus (complex reasoning required)
