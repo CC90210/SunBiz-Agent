@@ -1,14 +1,23 @@
 {
   "name": "sun-biz-agent",
-  "version": "1.0.0",
-  "description": "Sun Biz Agent — Full Backend Operations Agent for Sun Biz Funding (SMS, email blasts, deal lifecycle, funding intelligence, commission tracking; ads retained as lead-gen sub-capability)",
+  "version": "1.1.0",
+  "description": "SunBiz Agent — Solara + Helios. Bridge-side funding operations agent for Sun Biz Funding. Owns SunBiz daemons, migrations 042-069, and Solara's cognitive substrate.",
   "private": true,
   "scripts": {
     "setup": "python scripts/setup.py",
     "doctor": "python scripts/doctor.py",
-    "health": "python scripts/doctor.py",
+    "doctor:deep": "python scripts/doctor.py --deep",
+    "health": "python scripts/doctor.py --json",
     "api": "python scripts/api_server.py",
-    "sms:status": "python scripts/sms_engine.py status --json"
+    "sms:status": "python scripts/sms_engine.py status --json",
+    "daemon:sequence": "python scripts/sequence_runner.py loop --interval 10",
+    "daemon:shop-out": "python scripts/shop_out_sender.py loop --interval 60",
+    "daemon:classifier": "python scripts/lender_response_classifier.py loop --interval 300",
+    "daemon:renewal": "python scripts/renewal_reminder.py loop",
+    "daemon:followup": "python scripts/follow_up_generator.py loop",
+    "daemon:cold": "python scripts/cold_outreach_runner.py loop",
+    "daemon:daily-plan": "python scripts/daily_plan_generator.py run",
+    "daemon:underwriting": "python scripts/underwriting_orchestrator.py loop"
   },
   "dependencies": {},
   "devDependencies": {}

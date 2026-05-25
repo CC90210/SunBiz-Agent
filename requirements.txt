@@ -1,10 +1,50 @@
-facebook-business>=22.0.0
-google-ads>=25.0.0
-google-genai>=1.0.0
-Pillow>=10.0.0
+# SunBiz-Agent Python dependencies
+# Updated 2026-05-25 — audited against all 8 daemons + statement_parser + send_gateway imports.
+# Pin major versions only; patch updates are safe within a major.
+
+# --- Core / shared ---
 python-dotenv>=1.0.0
 requests>=2.31.0
 jinja2>=3.1.0
-twilio>=9.0.0
+
+# --- Web framework (api_server.py) ---
 fastapi>=0.115.0
 uvicorn>=0.30.0
+
+# --- SMS transport (shop_out_sender, sms_engine, cold_outreach_runner) ---
+twilio>=9.0.0
+
+# --- Email (shop_out_sender, lender_response_classifier, email_blast) ---
+# smtplib and imaplib are stdlib; no pip package needed.
+# google-auth is needed for Gmail OAuth if switching away from App Passwords.
+google-auth>=2.0.0
+google-auth-httplib2>=0.2.0
+google-api-python-client>=2.0.0
+
+# --- AI / LLM (underwriting_orchestrator, lender_response_classifier, daily_plan_generator) ---
+anthropic>=0.25.0
+
+# --- PDF / document parsing (underwriting: statement_parser) ---
+pdfplumber>=0.10.0
+PyMuPDF>=1.24.0          # fitz — faster page rendering for bank statement PDFs
+
+# --- Image generation (imagen_generate, generate_logo — legacy ad tooling) ---
+google-genai>=1.0.0
+Pillow>=10.0.0
+
+# --- Ads tooling (meta_ads_engine, google_ads_engine — lead-gen sub-capability) ---
+facebook-business>=22.0.0
+google-ads>=25.0.0
+
+# --- Supabase (all daemons read/write via REST or service-role) ---
+supabase>=2.0.0
+
+# --- Scheduling / time helpers ---
+python-dateutil>=2.8.0
+pytz>=2024.1
+
+# --- Async support (sequence_runner, renewal_reminder async paths) ---
+httpx>=0.27.0
+
+# --- Data validation ---
+pydantic>=2.0.0
