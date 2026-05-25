@@ -18,6 +18,15 @@ requires:
 
 # Shop-Out Routing
 
+> **Where these endpoints live:** All `/api/...` URLs below are routes on
+> the OASIS Command Center dashboard (repo: `CC90210/oasis-command-center`,
+> deployed at https://agent-dashboard-sigma-eight.vercel.app). They are NOT
+> served by this repo's local `scripts/api_server.py` (which only exposes
+> `/health`, `/status`, `/sms/send`, `/webhook/jotform`). Solara's bridge
+> makes authenticated `fetch` calls into the dashboard's API surface, and
+> the dashboard then writes to Supabase / queues threads / dispatches the
+> 8 daemons in this repo.
+
 ## Purpose
 
 Route a specific application to the optimal lender set. Never blast indiscriminately — always dry-run first, surface the plan to Ezra, then execute on explicit approval.

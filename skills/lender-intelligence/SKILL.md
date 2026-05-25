@@ -20,6 +20,15 @@ requires:
 
 # Lender Intelligence
 
+> **Where these endpoints live:** All `/api/...` URLs below are routes on
+> the OASIS Command Center dashboard (repo: `CC90210/oasis-command-center`,
+> deployed at https://agent-dashboard-sigma-eight.vercel.app). They are NOT
+> served by this repo's local `scripts/api_server.py` (which only exposes
+> `/health`, `/status`, `/sms/send`, `/webhook/jotform`). Solara's bridge
+> makes authenticated `fetch` calls into the dashboard's API surface, and
+> the dashboard then writes to Supabase / queues threads / dispatches the
+> 8 daemons in this repo.
+
 ## Purpose
 
 Match a deal profile against historical lender behavior. The `lender_feedback` table accumulates every outcome (approved, declined, countered) across every deal. This skill mines that history to surface which funders are likely to approve, at what terms, and why others have declined.
