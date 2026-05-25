@@ -1,31 +1,55 @@
 {
-  "mcpServers": {
-    "meta-ads-mcp": {
-      "command": "cmd",
-      "args": ["/c", "scripts/meta-ads-mcp-wrapper.cmd"],
-      "_comment": "Meta Ads MCP via uvx meta-ads-mcp. Credentials read from .env.agents."
-    },
-    "google-ads-mcp": {
-      "command": "cmd",
-      "args": ["/c", "scripts/google-ads-mcp-wrapper.cmd"],
-      "disabled": true,
-      "_comment": "Google Ads MCP via vendor/mcp-google-ads. Run scripts/generate_google_ads_token.py after setting GOOGLE_ADS_* in .env.agents, then remove disabled flag."
-    },
-    "playwright": {
-      "command": "npx",
-      "args": ["@playwright/mcp@latest"]
-    },
-    "context7": {
-      "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp@latest"]
-    },
-    "memory": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"]
-    },
-    "sequential-thinking": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+    "mcpServers": {
+        "sequential-thinking": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@modelcontextprotocol/server-sequential-thinking"
+            ]
+        },
+        "playwright": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@playwright/mcp@latest",
+                "--headless"
+            ]
+        },
+        "context7": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@upstash/context7-mcp@latest"
+            ]
+        },
+        "memory": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@modelcontextprotocol/server-memory"
+            ]
+        },
+        "knowledge-graph": {
+            "command": "npx",
+            "args": [
+                "tsx",
+                "C:\\Users\\User\\tools\\knowledge-graph\\src\\mcp\\index.ts"
+            ],
+            "env": {
+                "KG_VAULT_PATH": "C:\\Users\\User\\SunBiz-Agent",
+                "KG_DATA_DIR": "C:\\Users\\User\\tools\\knowledge-graph\\data"
+            }
+        },
+        "meta-ads-mcp": {
+            "command": "cmd",
+            "args": ["/c", "scripts/meta-ads-mcp-wrapper.cmd"],
+            "_comment": "Meta Ads MCP via uvx meta-ads-mcp. Credentials read from .env.agents. Marketing-era legacy from AdVantage V2.0 — kept for now; will retire once Maven (CMO-Agent) owns all ads."
+        },
+        "google-ads-mcp": {
+            "command": "cmd",
+            "args": ["/c", "scripts/google-ads-mcp-wrapper.cmd"],
+            "disabled": true,
+            "_comment": "Google Ads MCP via vendor/mcp-google-ads. Run scripts/generate_google_ads_token.py after setting GOOGLE_ADS_* in .env.agents, then remove disabled flag."
+        }
     }
-  }
 }

@@ -1,174 +1,128 @@
-# CAPABILITIES — Complete Tool Inventory
+---
+tags: [capabilities, tools]
+---
 
-> All tools available to Sun Biz Agent across all interfaces.
-> *Repositioned 2026-05-11: scope expanded from "AdVantage — Marketing Director (Meta + Google Ads only)" to "Sun Biz Agent — Full Backend Operations Agent". The 8 MCP servers + Python SDKs below remain — they now cover the lead-gen sub-capability while new CLI scripts (sms_engine, funding_intel, deal_tracker, renewal_scanner, state_bridge) drive ops.*
+# CAPABILITIES — Tool & Integration Registry (SunBiz V6.x)
+
+> Complete inventory of what Solara can do. Last reviewed: 2026-05-25 (V6.x cognitive upgrade).
+> Single-tenant deployment. All Supabase data scoped to `tenant_id = 'sunbiz'`.
+> Counts are live — do not hardcode. For live truth: `python scripts/doctor.py --json`.
 
 ---
 
-## MCP Servers (8 Total)
+## CEO-Agent V6 Substrate Touchpoints
 
-### 1. Google Ads MCP
-- **Status:** PENDING SETUP
-- **Server:** `google-ads-mcp` (community: grantweston/google-ads-mcp-complete or custom)
-- **Capabilities:** Campaign CRUD, Ad Group CRUD, Ad CRUD, Keyword management, GAQL reporting, Budget management, Asset upload
-- **Auth:** Developer token + OAuth2 (client_id, client_secret, refresh_token) + customer_id
-- **Fallback:** Direct `google-ads` Python SDK (v29.2.0)
+Solara uses components of Bravo's V6 stack via sanctioned interfaces. Read from these; do not write to CEO-Agent files directly.
 
-### 2. Meta Ads MCP
-- **Status:** PENDING SETUP
-- **Server:** `meta-ads-mcp` (pipeboard-co/meta-ads-mcp or custom)
-- **Capabilities:** Campaign CRUD, Ad Set CRUD, Ad CRUD, Creative management, Audience management, Insights/reporting, Media upload
-- **Auth:** System user access token + app_id + app_secret + ad_account_id
-- **Fallback:** Direct `facebook-business` Python SDK (v22.0)
-
-### 3. Playwright MCP
-- **Status:** AVAILABLE
-- **Server:** `@playwright/mcp@latest`
-- **Capabilities:** Browser navigation, screenshots, form filling, clicking, JavaScript evaluation
-- **Use:** Fallback for operations not supported by APIs, visual verification of ads
-
-### 4. Context7 MCP
-- **Status:** AVAILABLE
-- **Server:** `@upstash/context7-mcp@latest`
-- **Capabilities:** Library documentation lookup, code examples
-- **Use:** Look up Google Ads API or Meta API documentation on demand
-
-### 5. Memory MCP
-- **Status:** AVAILABLE
-- **Server:** `@modelcontextprotocol/server-memory`
-- **Capabilities:** Knowledge graph CRUD (entities, relations, observations)
-- **Use:** Persistent campaign knowledge, audience insights, optimization learnings
-
-### 6. Sequential Thinking MCP
-- **Status:** AVAILABLE
-- **Server:** `@modelcontextprotocol/server-sequential-thinking`
-- **Capabilities:** Structured multi-step reasoning
-- **Use:** Complex campaign strategy, budget allocation, optimization decisions
-
-### 7. n8n MCP
-- **Status:** AVAILABLE (if n8n instance running)
-- **Server:** `n8n-mcp` (via wrapper script)
-- **Capabilities:** Workflow search, execution, details
-- **Use:** Automated reporting, scheduled campaign checks, alert workflows
-
-### 8. Late MCP
-- **Status:** AVAILABLE (if configured)
-- **Server:** `late-sdk[mcp]` (via wrapper script)
-- **Capabilities:** Social media posting, account management, cross-posting
-- **Use:** Organic social media content alongside paid ads
+| Component | Interface | Purpose |
+|-----------|-----------|---------|
+| **state_bridge** | `python scripts/state_bridge.py {status,heartbeat,sync}` | Heartbeats to `empire_state.db`; emits `SUNBIZ_*` events to `agent_events` bus |
+| **memory_retriever** | `python scripts/memory_retriever.py query "<question>"` | FTS5 index of all brain/memory/skills files — <10ms retrieval |
+| **send_gateway** | `python scripts/send_gateway.py send --channel {email,sms} ...` | Enforces TCPA/CASL/cooldown/caps before any outbound send |
+| **agent_inbox** | `python scripts/agent_inbox.py {list,post} --to {solara,helios,bravo}` | Cross-agent messaging — Solara → Helios for sales handoffs |
+| **supabase_tool** | `python scripts/supabase_tool.py {select,insert,update,upsert,rpc} <table>` | Tenant-scoped DB access (always passes `tenant_id=sunbiz`) |
 
 ---
 
-## Python SDK Tools (Fallback Layer)
+## SunBiz-Specific Daemons
 
-### Google Ads Python SDK
-- **Package:** `google-ads` (v29.2.0)
-- **API Version:** v23.1 (latest)
-- **Key Services:**
-  - `CampaignService` — Campaign CRUD
-  - `AdGroupService` — Ad Group CRUD
-  - `AdGroupAdService` — Ad CRUD
-  - `AdGroupCriterionService` — Keyword/targeting CRUD
-  - `CampaignBudgetService` — Budget management
-  - `GoogleAdsService.SearchStream` — GAQL reporting
-  - `AssetService` — Media asset management
-  - `BatchJobService` — Bulk operations
-  - `BiddingStrategyService` — Bid strategy management
+These scripts are Solara's primary execution layer. All are CLI-first; secrets read from `.env.agents`.
 
-### Meta Marketing Python SDK
-- **Package:** `facebook-business` (v22.0)
-- **API Version:** Graph API v22.0
-- **Key Classes:**
-  - `AdAccount` — Account-level operations
-  - `Campaign` — Campaign CRUD
-  - `AdSet` — Ad Set CRUD
-  - `Ad` — Ad CRUD
-  - `AdCreative` — Creative management
-  - `AdImage` — Image upload/management
-  - `AdVideo` — Video upload/management
-  - `CustomAudience` — Audience management
-  - `AdsInsights` — Performance reporting
+| Daemon / Script | Command | Purpose |
+|----------------|---------|---------|
+| **shop_out_sender** | `python scripts/shop_out_sender.py {send,status,retry} --deal-id <id>` | Packages application + docs, routes to ranked lender(s), logs submission |
+| **sequence_runner** | `python scripts/sequence_runner.py {start,pause,resume} --lead-id <id> --sequence <name>` | Drip cadence engine — merchant follow-up sequences |
+| **lender_response_classifier** | `python scripts/lender_response_classifier.py classify --deal-id <id> --response "<text>"` | Parses lender portal responses → approved/declined/more-info-needed + reason code |
+| **renewal_reminder** | `python scripts/renewal_reminder.py scan --window 30 --json` | Finds funded deals within 30-day renewal window; outputs ranked list |
+| **follow_up_generator** | `python scripts/follow_up_generator.py draft --lead-id <id> --context "<context>"` | Generates next merchant touch (email/SMS) based on lifecycle stage |
+| **cold_outreach_runner** | `python scripts/cold_outreach_runner.py {dry-run,send} --list <csv>` | TCPA-gated cold outreach to imported leads (operator-initiated only) |
+| **daily_plan_generator** | `python scripts/daily_plan_generator.py run --date today --json` | Assembles Jordan's call sheet + Solara's shop-out queue for the day |
+| **underwriting_orchestrator** | `python scripts/underwriting_orchestrator.py score --deal-id <id>` | Pre-screens application against lender appetite matrix before submission |
+| **deal_tracker** | `python scripts/deal_tracker.py {list,update,add} --status <status>` | CRUD for deal lifecycle (lead→funded→closed) |
+| **funding_intel** | `python scripts/funding_intel.py {factor-rate,commission,tar-band} --deal-id <id>` | Factor rate lookup, commission math, TAR-band classification |
+| **sms_engine** | `python scripts/sms_engine.py {send,status,blast} ...` | Multi-provider SMS (Twilio primary, Telnyx/Plivo failover) |
+| **email_blast** | `python scripts/email_blast.py {send,preview,status} ...` | Gmail SMTP, thread-safe, CAN-SPAM compliant |
 
 ---
 
-## Native IDE/CLI Tools
+## Solara's Tool Palette (What Solara Can Use Directly)
 
-### Claude Code (Opus 4.6)
-- Read, Write, Edit, Glob, Grep, Bash
-- Agent (sub-agent orchestration)
-- TodoWrite (task tracking)
-- WebSearch, WebFetch
+Solara has access to these; Helios has a separate, outreach-focused palette.
 
-### Antigravity IDE
-- All Claude Code tools + IDE-specific features
-- Workflow commands (`.agents/workflows/`)
-- Rules and customization
+| Tool | Purpose | Notes |
+|------|---------|-------|
+| `supabase_tool.py` | Read/write deal state, lender profiles, merchant records | Always pass `--tenant sunbiz` |
+| `shop_out_sender.py` | Submit applications to lenders | Requires Ezra confirmation before send |
+| `underwriting_orchestrator.py` | Pre-screen applications | Fully autonomous |
+| `lender_response_classifier.py` | Parse lender responses | Fully autonomous |
+| `renewal_reminder.py` | Scan renewal window | Fully autonomous |
+| `daily_plan_generator.py` | Build daily brief | Fully autonomous |
+| `funding_intel.py` | Factor rate / commission math | Fully autonomous |
+| `deal_tracker.py` | Update deal state | Requires confirmation for funded-deal marking |
+| `send_gateway.py` | Compliant email/SMS send | Gateway enforces TCPA/CASL — do not bypass |
+| `agent_inbox.py` | Handoffs to Helios or messages to Bravo | Read freely; post requires confirmation |
+| `state_bridge.py` | Heartbeat to V6 substrate | Autonomous (session start/end) |
+| `memory_retriever.py` | Search brain/memory files | Autonomous |
 
-### Gemini CLI
-- File operations, web search
-- Speed-optimized for quick tasks
-
----
-
-## AI Image Generation Tools
-
-### Gemini Imagen (Nano Banana)
-- **Status:** Requires API key
-- **Package:** `google-genai`
-- **Models:** `gemini-2.0-flash-exp` (native image gen), `imagen-3.0-generate-002` (dedicated)
-- **Use:** Generate professional ad creative images from text prompts — business lending ads, A/B test variants, all platform sizes
-- **Script:** `scripts/imagen_generate.py`
-- **Install:** `pip install google-genai Pillow`
-- **API Key:** Get from https://aistudio.google.com/apikey → set `GEMINI_API_KEY` in `.env.agents`
+**What Solara does NOT use directly:**
+- Raw `send_sms` without TCPA gate — always routed through `send_gateway.py`.
+- Raw bash subprocess calls in daemon-spawned code — use `safe_run()` from `_subprocess_helpers.py`.
+- Helios-specific tools (outbound cold call scripts, meeting-setter sequences).
 
 ---
 
-## Video Production Tools
+## MCP Servers
 
-### FFmpeg
-- **Status:** Requires installation
-- **Use:** Video trimming, resizing, compression, caption burning, thumbnail extraction
-- **Install:** `winget install ffmpeg` or download from ffmpeg.org
+| Server | Purpose | Status |
+|--------|---------|--------|
+| **Playwright** | Browser automation, visual lender portal verification | Available |
+| **Context7** | Live library documentation lookup | Available |
+| **Memory** | Persistent knowledge graph | Available |
+| **Sequential Thinking** | Multi-step reasoning | Available |
 
-### Whisper (OpenAI)
-- **Status:** Requires installation
-- **Package:** `openai-whisper`
-- **Use:** Auto-captioning / speech-to-text for video ads
-- **Install:** `pip install openai-whisper`
+Note: Google Ads MCP and Meta Ads MCP are available as lead-gen sub-capability but are Helios/outreach lane tools.
 
 ---
 
-## Billing & Payment (Ad Spend)
+## Supabase Project
 
-### Google Ads Billing
-- **How it works:** Google bills the linked payment method (credit card, bank account) in the Google Ads account
-- **API access:** `BillingSetupService` for viewing billing info, `InvoiceService` for invoice data
-- **Budget control:** Set daily budgets via `CampaignBudgetService` — Google charges the payment method on file
-- **Reporting:** `metrics.cost_micros` in GAQL gives exact spend data
-- **Note:** The API does NOT process payments directly — it controls budgets, Google handles billing
+| Project | Purpose |
+|---------|---------|
+| **sunbiz** (scoped under Bravo's project) | All deal state, lender profiles, merchant records, agent traces — all `tenant_id = 'sunbiz'` |
 
-### Meta Ads Billing
-- **How it works:** Meta bills the payment method linked in Business Manager (credit card, PayPal, bank)
-- **API access:** Read billing info via `/act_{id}/billing_events`, payment methods via `/act_{id}/payment_methods`
-- **Budget control:** Set daily/lifetime budgets on campaigns and ad sets — Meta charges the payment method
-- **Reporting:** `spend` field in Insights API gives exact spend data
-- **Note:** The API does NOT process payments directly — it controls budgets, Meta handles billing
-
-### Budget Management via API
-Both platforms work the same way:
-1. **Set budget** via API → Platform delivers ads up to that budget
-2. **Platform bills** the payment method on file in the ad account
-3. **We monitor** spend via reporting APIs (GAQL / Insights)
-4. **We control** by adjusting budgets, pausing campaigns, or setting rules
+Tables used: `leads`, `applications`, `deals`, `offers`, `lenders`, `agent_traces`, `session_logs`, `memories`, `agent_state`, `sops`, `self_modification_log`, `renewal_pipeline`.
 
 ---
 
-## Tool Counts
-- **MCP Servers:** 8 (2 pending setup, 6 available)
-- **Python SDK Services:** 19 (Google: 9, Meta: 10)
-- **AI Image Generation:** 1 (Gemini Imagen)
-- **Video Tools:** 2 (FFmpeg, Whisper)
-- **Native Tools:** 12+
-- **Agents:** 15
-- **Skills:** 18
-- **Workflows:** 11
+## MCA-Domain Tool Chain (End-to-End Flow)
+
+```
+Lead Intake (JotForm webhook → deal_tracker add)
+  ↓
+Pre-Screen (underwriting_orchestrator score)
+  ↓
+Shop-Out (shop_out_sender send → lender_response_classifier classify)
+  ↓
+Offer Presentation (follow_up_generator draft → send_gateway send to merchant)
+  ↓
+Funded (deal_tracker update --status funded → funding_intel commission)
+  ↓
+Renewal (renewal_reminder scan → sequence_runner start renewal_sequence)
+```
+
+---
+
+## Compliance Enforcement Points
+
+| Gate | Enforced By | Blocks On |
+|------|-------------|-----------|
+| TCPA opt-in check | `send_gateway.py` | SMS to any number without verified opt-in |
+| CASL consent check | `send_gateway.py` | Email to CA-based merchant without consent |
+| CAN-SPAM footer | `email_blast.py` | Any email missing unsubscribe mechanism |
+| Quiet hours | `send_gateway.py` | Outbound outside 8am-9pm merchant local time |
+| "Loan" language gate | Draft critic in `send_gateway.py` | Any outbound using banned terminology |
+| Stacking risk flag | `underwriting_orchestrator.py` | Submission when position count exceeds lender threshold |
+
+## Obsidian Links
+- [[brain/AGENTS]] | [[brain/AGENT_ROUTER]] | [[brain/INTENTS]]
+- [[brain/SOUL]] | [[brain/STATE]]

@@ -1,84 +1,95 @@
-# AGENTS — Sub-Agent Registry & Orchestration Matrix
+---
+tags: [agents, registry]
+---
 
-> 15 specialized agents. Route tasks by type and complexity.
+# AGENTS — Sub-Agent Registry (SunBiz V6.x)
+
+> SunBiz is a focused product, not an empire. Keep this registry tight.
+> Primary agents: Solara (backend ops) + Helios (sales-facing).
+> Specialized sub-agents are lightweight — spawn only when the task warrants it.
 
 ---
 
-## Top-Level Operator Pair
+## Primary Agent Pair
 
-Before routing into the 15 internal sub-agents, treat the Sun Biz deployment itself as a two-operator system:
+| Agent | Key | Lane | Scope |
+|-------|-----|------|-------|
+| **Solara** | `sunbiz` | Backend operations | Deal ledger, shop-out logic, lender relationships, renewal pipeline, compliance rails, reporting |
+| **Helios** | `helios` | Sales-facing outreach | Merchant outbound (calls, SMS, email), sequence execution, appointment setting, offer presentation delivery |
 
-| Layer | Agent Key | Purpose |
-|---|---|---|
-| Backend ops | `sunbiz` | **Solara / Solar** owns admin operations: lead review, lender routing, applications, funded deals, renewals, commissions, and compliance rails. |
-| Outreach ops | `suga_sean` | **Suga Sean** owns text blasts, email outreach, reply triage, and meeting-setting. |
-
-Rule of thumb:
-
-- If the task touches the source of truth, deal state, lender ops, or compliance, Solara leads.
-- If the task touches outbound motion, follow-up cadence, or booking meetings, Suga Sean leads.
-- If both are involved, Solara protects the ledger and Suga Sean drives the next touch.
+**Routing rule:**
+- If the task touches deal state, lender ops, application data, or compliance → Solara.
+- If the task touches merchant outbound, follow-up cadence, or booking meetings → Helios.
+- If both are involved: Solara protects the ledger; Helios drives the merchant touch.
+- Escalation path: Solara → Ezra (never Helios → Solara directly for deal decisions).
 
 ---
 
-## Agent Registry
+## Cross-Agent Posture
 
-| # | Agent | File | Role | Model | Trigger |
-|---|-------|------|------|-------|---------|
-| 1 | architect | `agents/architect.md` | System design, infrastructure | Opus | "design", "architecture", "infrastructure" |
-| 2 | ad-strategist | `agents/ad-strategist.md` | Campaign strategy, A/B testing, optimization | Opus | "strategy", "optimize", "A/B test", "campaign plan" |
-| 3 | content-creator | `agents/content-creator.md` | Ad copy, headlines, descriptions, CTAs | Sonnet | "write ad", "headline", "copy", "CTA" |
-| 4 | media-manager | `agents/media-manager.md` | Image/video upload, creative management | Sonnet | "upload", "image", "creative" |
-| 5 | google-ads-specialist | `agents/google-ads-specialist.md` | Google Ads API CRUD operations | Opus | "google", "search ads", "display ads", "GAQL" |
-| 6 | meta-ads-specialist | `agents/meta-ads-specialist.md` | Meta Marketing API CRUD operations | Opus | "facebook", "instagram", "meta", "ad set" |
-| 7 | analytics-analyst | `agents/analytics-analyst.md` | Performance reporting, ROAS analysis | Opus | "performance", "metrics", "report", "ROAS", "CTR" |
-| 8 | audience-builder | `agents/audience-builder.md` | Custom audiences, lookalikes, targeting | Sonnet | "audience", "targeting", "lookalike", "demographic" |
-| 9 | seo-specialist | `agents/seo-specialist.md` | SEO, AEO, keyword research, Quality Score | Opus | "SEO", "keywords", "quality score", "AEO", "ranking" |
-| 10 | video-editor | `agents/video-editor.md` | Video production, captioning, formatting | Sonnet | "video edit", "trim", "caption", "thumbnail", "reels" |
-| 11 | debugger | `agents/debugger.md` | Root cause analysis, API error resolution | Opus | "error", "bug", "fix", "broken", "failed" |
-| 12 | explorer | `agents/explorer.md` | Codebase navigation, research | Sonnet | "find", "search", "where is", "show me" |
-| 13 | documenter | `agents/documenter.md` | Documentation, SOPs, memory management | Sonnet | "document", "SOP", "update docs" |
-| 14 | workflow-builder | `agents/workflow-builder.md` | n8n automation, scheduled tasks | Sonnet | "automate", "workflow", "schedule", "n8n" |
-| 15 | image-generator | `agents/image-generator.md` | AI ad creative generation (Gemini Imagen) | Opus | "generate ad", "create image", "ad creative", "imagen" |
+| Agent | Relationship | Solara's Posture |
+|-------|-------------|-----------------|
+| **Bravo** (CEO-Agent) | Parent substrate | Reads V6 substrate from Business-Empire-Agent. Writes only through sanctioned helpers (state_bridge, send_gateway, agent_inbox). Does NOT edit Bravo's files. |
+| **Atlas** (CFO-Agent) | Budget authority | Surfaces spend decisions above threshold; Atlas approves. Does not interact directly in day-to-day. |
+| **Maven** (CMO-Agent) | CC's content domain | No overlap. SunBiz brand voice is Ezra's domain, not Maven's. |
+| **Helios** | Sibling | Solara stages deals and drafts merchant touches; Helios executes them. Handoffs via `agent_inbox.py post --to helios`. |
+
+---
+
+## Specialized Sub-Agents (Spawn On Demand)
+
+These are lighter-weight agents invoked for specific tasks. They are not always running.
+
+| Agent | Purpose | Trigger | Model |
+|-------|---------|---------|-------|
+| **underwriting-checker** | Deep pre-screen of an application before shop-out — checks against all known lender appetite profiles, flags specific risks | "Pre-screen this application" / "Is this fundable?" | Sonnet |
+| **offer-formatter** | Takes raw lender offer terms and formats a clean merchant-facing offer summary (no jargon, compliant language) | "Format this offer for the merchant" | Sonnet |
+| **decline-analyst** | After a full shop-out decline (all lenders pass), investigates root cause and generates a structured Reflexion entry | "Why did all lenders decline?" / shop-out complete with zero approvals | Sonnet |
+| **debugger** | Root-cause analysis on script errors, API failures, or daemon issues | "X is broken" / script returns unexpected output | Sonnet |
+| **lender-researcher** | Research a new lender's appetite, typical terms, and submission requirements | "Add [Lender] to our book" / "What does [Lender] fund?" | Sonnet |
 
 ---
 
 ## Orchestration Matrix
 
-### Single-Agent Tasks (Simple)
+### Single-Agent Tasks
 | Task | Agent |
 |------|-------|
-| Check campaign status | google-ads-specialist OR meta-ads-specialist |
-| Write ad headline | content-creator |
-| Upload image | media-manager |
-| Generate ad creative image | image-generator |
-| Pull performance report | analytics-analyst |
-| Debug API error | debugger |
+| Check deal status | Solara |
+| Update deal stage | Solara |
+| Scan renewal window | Solara |
+| Pre-screen application | Solara + underwriting-checker |
+| Draft merchant email | Helios |
+| Send follow-up sequence | Helios |
 
-### Multi-Agent Tasks (Moderate)
+### Multi-Agent Tasks
 | Task | Primary | Support |
 |------|---------|---------|
-| Create new campaign | ad-strategist | seo-specialist, content-creator, audience-builder |
-| Launch ads with creative | media-manager | image-generator, video-editor, content-creator, google-ads-specialist |
-| Optimize underperforming campaign | analytics-analyst | ad-strategist, seo-specialist, audience-builder |
-| Cross-platform campaign | ad-strategist | google-ads-specialist, meta-ads-specialist |
-| SEO + ad copy optimization | seo-specialist | content-creator, google-ads-specialist |
-| Video ad production | video-editor | media-manager, content-creator |
+| New application → shop-out | Solara | underwriting-checker, (Ezra confirmation) |
+| Offer received → merchant presentation | Solara (format) | Helios (deliver), offer-formatter |
+| All-decline analysis | Solara | decline-analyst |
+| Renewal outreach | Solara (identify, draft) | Helios (send) |
+| New lender onboarding | Solara | lender-researcher |
 
-### Full Orchestration Tasks (Complex)
-| Task | Agents Involved |
-|------|----------------|
-| Full campaign strategy + launch | ad-strategist → seo-specialist → content-creator → image-generator → video-editor → media-manager → audience-builder → google-ads-specialist + meta-ads-specialist → analytics-analyst |
-| Performance review + optimization | analytics-analyst → ad-strategist → seo-specialist → content-creator (new copy) → audience-builder (refined targeting) |
-| Video ad campaign | ad-strategist → content-creator (script) → video-editor (production) → media-manager (upload) → platform specialists (launch) |
-| System health + recovery | debugger → architect → workflow-builder |
+### Escalation Paths
+| Situation | Escalation |
+|-----------|-----------|
+| Stacking-risk threshold exceeded | Solara → Ezra (same turn, explicit confirmation required) |
+| All lenders decline | Solara → decline-analyst → Ezra summary |
+| Compliance-sensitive copy | Solara flags → Ezra approves → Helios sends |
+| Budget above threshold | Solara → Atlas (CFO-Agent) for modeling → Ezra final call |
+| Merchant disputes funded deal | Solara → Ezra direct (not automated) |
 
 ---
 
 ## Dispatch Rules
 
-1. **Always route to the most specific agent** — Don't use architect for ad copy
-2. **Chain agents for multi-step tasks** — Output of one feeds input of next
-3. **Parallel execution when independent** — Google and Meta operations can run simultaneously
-4. **Escalate to Opus for ambiguity** — When task is unclear, use ad-strategist (Opus) to interpret
-5. **Log all agent dispatches** — Track which agents handled which tasks for pattern learning
+1. **Route to the most specific agent.** Don't use Solara for copywriting; don't use Helios for deal ledger updates.
+2. **Solara protects the ledger.** Only Solara writes deal state. Helios reads it, never writes it.
+3. **Escalate irreversibles to Ezra.** Submission to lender, marking funded, blacklisting a funder: Ezra confirms.
+4. **Log all agent handoffs.** Every `agent_inbox.py post` is traced.
+5. **Spawn sub-agents only when the task justifies it.** For simple lookups, Solara handles directly.
+
+## Obsidian Links
+- [[brain/SOUL]] | [[brain/CAPABILITIES]] | [[brain/AGENT_ROUTER]]
+- [[brain/INTENTS]] | [[brain/STATE]]
