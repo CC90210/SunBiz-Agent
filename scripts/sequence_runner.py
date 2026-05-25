@@ -147,7 +147,7 @@ def _log(msg: str) -> None:
 # ─────────────────────────────────────────────────────────────────────
 # Mustache-style template rendering
 #
-# Mirrors apps/command-center/lib/drips/templates.ts. Cross-language
+# Mirrors lib/drips/templates.ts in the oasis-command-center repo. Cross-language
 # sync — if the regex or default-value rule changes, update both.
 #
 # PARITY ASSERTION — every case below MUST behave identically in both
@@ -247,7 +247,23 @@ def _has_active_state(sb, sequence_id: str, lead_id: str) -> bool:
 
 
 def _enroll_step(sb, sequence: dict, lead_id: str, payload: dict, step_index: int) -> Optional[str]:
-    """Insert a sequence_state row. Returns the new row id on success."""
+    """Insert a sequence_state row. Returns the new row id on success.
+
+    Codex finding #3 fix (2026-05-15): the SELECT-then-INSERT pattern in
+    enrollment_tick can race against itself when two agent_events for the
+    same (sequence, lead) land in the same poll batch. Migration 045
+    (database/045_sequence_state_one_per_lead.sql) added a partial UNIQUE
+    index on (sequence_id, lead_id) WHERE status IN ('scheduled','failed').
+    A concurrent duplicate INSERT now raises a unique_violation that we
+    catch + treat as "already enrolled, no-op" — same outcome the
+    in-Python _has_active_state check would have produced, just enforced
+    at the DB layer where the race window is zero.
+
+    The unique_violation surfaces as a PostgrestAPIError carrying
+    code=23505. We don't bubble it up as an error; the second event
+    arriving for an already-enrolled lead is expected behavior and the
+    DB just refused the dupe. Other exceptions still log as failures.
+    """
     steps = sequence.get("steps") or []
     if step_index >= len(steps):
         return None
@@ -273,8 +289,80 @@ def _enroll_step(sb, sequence: dict, lead_id: str, payload: dict, step_index: in
         if r.data:
             return r.data[0]["id"]
     except Exception as e:
+        msg = str(e).lower()
+        # Postgres unique-violation = expected idempotency outcome.
+        # Anything else is a real failure.
+        if "23505" in msg or "unique" in msg or "duplicate key" in msg:
+            _log(f"enroll dedup (already active) seq={sequence.get('id')} lead={lead_id}")
+            return None
         _log(f"enroll insert failed seq={sequence.get('id')} lead={lead_id}: {e}")
     return None
+
+
+def _cancel_drips_for_lead(sb, tenant_id: str, lead_id: str, form_id: str) -> int:
+    """Cancel any in-flight sequence_state rows for a lead that just
+    submitted a form.
+
+    Operator's stuck-lead drips should die the moment the lead does the
+    thing the drip was nagging them to do. Keeping the drip alive after a
+    form submission means the lead gets follow-up spam for something they
+    already completed — trust-killer.
+
+    2026-05-25 second SunBiz product meeting expansion + migration 069.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    cancelled = 0
+    try:
+        active_rows = (
+            sb.table("sequence_state")
+            .select("id, sequence_id, step_index")
+            .eq("tenant_id", tenant_id)
+            .eq("lead_id", lead_id)
+            .in_("status", ["scheduled", "pending"])
+            .execute()
+        )
+    except Exception as exc:
+        _log(f"form_hook: sequence_state read failed tenant={tenant_id} lead={lead_id}: {exc}")
+        return 0
+
+    for row in active_rows.data or []:
+        before_snap = {"status": row.get("status"), "sequence_id": row.get("sequence_id")}
+        try:
+            sb.table("sequence_state").update({
+                "status": "cancelled",
+                "last_error": "superseded_by_form_submission",
+                "last_attempt_at": now_iso,
+            }).eq("id", row["id"]).execute()
+            cancelled += 1
+        except Exception as exc:
+            _log(f"form_hook: cancel failed row={row['id']}: {exc}")
+            continue
+
+        # Audit trail — use tenant_audit_log (already in schema per migration 053).
+        # Writes as the daemon (actor_user_id=NULL, actor_email='system').
+        try:
+            sb.table("tenant_audit_log").insert({
+                "tenant_id": tenant_id,
+                "action_type": "drip_cancelled_by_form_submission",
+                "target_table": "sequence_state",
+                "target_id": row["id"],
+                "before": before_snap,
+                "after": {
+                    "status": "cancelled",
+                    "last_error": "superseded_by_form_submission",
+                },
+                "metadata": {
+                    "lead_id": lead_id,
+                    "form_id": form_id,
+                    "sequence_id": row.get("sequence_id"),
+                    "step_index": row.get("step_index"),
+                },
+            }).execute()
+        except Exception as exc:
+            # Audit write failure is non-fatal — the cancellation already landed.
+            _log(f"form_hook: audit log failed row={row['id']}: {exc}")
+
+    return cancelled
 
 
 def enrollment_tick(sb) -> int:
@@ -306,6 +394,28 @@ def enrollment_tick(sb) -> int:
         tenant_id = payload.get("tenant_id")
         if not tenant_id:
             continue
+
+        # 2026-05-25 second SunBiz product meeting expansion + migration 069:
+        # Form-submission hook — when a lead submits a form, cancel any
+        # in-flight drip rows for that lead. Runs BEFORE the enrollment
+        # path so a form submission doesn't simultaneously enroll AND cancel.
+        #
+        # Operator's stuck-lead drips should die the moment the lead does
+        # the thing the drip was nagging them to do.
+        if (
+            event_type == "BRAVO_RECORD_STATUS_CHANGED"
+            and payload.get("entity_type") == "lead"
+            and payload.get("triggering_event") == "form_submitted"
+        ):
+            form_lead_id = payload.get("lead_id") or payload.get("record_id")
+            form_id = payload.get("form_id") or ""
+            if form_lead_id:
+                n = _cancel_drips_for_lead(sb, tenant_id, form_lead_id, form_id)
+                if n:
+                    _log(
+                        f"form_hook: cancelled {n} drip(s) "
+                        f"lead={form_lead_id} form={form_id}"
+                    )
 
         # Find active sequences for this tenant + event_type. Tenant
         # isolation is handled at the row level via tenant_id match —
@@ -503,15 +613,32 @@ def _send_step(sb, state_row: dict, sequence: dict) -> dict:
     return {"outcome": "error", "detail": f"{status}: {reason}"}
 
 
+# Worker identity stamped on claimed rows. Format mirrors PM2's
+# {name}-{instance} convention so a multi-process deploy shows up
+# legibly in the claimed_by column. Defaults to a static "sequence_runner"
+# when no per-instance hint exists.
+_WORKER_ID = os.environ.get("PM2_INSTANCE_ID") or os.environ.get("HOSTNAME") or "sequence_runner"
+
+
 def execution_tick(sb) -> int:
-    """Poll due sequence_state rows, fire each, advance to the next
-    step on success. Returns the number of rows processed."""
+    """Poll due sequence_state rows, atomically claim each, fire it, advance
+    to the next step on success. Returns the number of rows processed.
+
+    Codex finding #1 fix (2026-05-16 / migration 046): each row goes
+    through claim_sequence_state_row RPC BEFORE _send_step. The RPC
+    does an atomic UPDATE...RETURNING with WHERE status='scheduled' AND
+    claimed_at IS NULL — only the first concurrent caller's UPDATE
+    matches, so two workers (or a PM2 restart overlap) can no longer
+    both dispatch the same row. A claim miss is silent — the row is
+    skipped; the winning worker handles it.
+    """
     now_iso = datetime.now(timezone.utc).isoformat()
     try:
         due = (
             sb.table("sequence_state")
-            .select("*")
+            .select("id")
             .eq("status", "scheduled")
+            .is_("claimed_at", "null")
             .lte("scheduled_for", now_iso)
             .order("scheduled_for", desc=False)
             .limit(50)
@@ -520,12 +647,30 @@ def execution_tick(sb) -> int:
     except Exception as e:
         _log(f"execution: sequence_state read failed: {e}")
         return 0
-    rows = due.data or []
-    if not rows:
+    candidate_ids = [r["id"] for r in (due.data or [])]
+    if not candidate_ids:
         return 0
 
     processed = 0
-    for row in rows:
+    for row_id in candidate_ids:
+        # Atomic claim — only one concurrent caller's UPDATE matches.
+        # RPC returns the full row when claim succeeds; empty when the
+        # row was already claimed (or status moved off 'scheduled') by
+        # another worker between our SELECT and now.
+        try:
+            claim = sb.rpc(
+                "claim_sequence_state_row",
+                {"row_id": row_id, "claimer": _WORKER_ID},
+            ).execute()
+        except Exception as e:
+            _log(f"execution: claim_sequence_state_row RPC failed row={row_id}: {e}")
+            continue
+        claimed_rows = claim.data or []
+        if not claimed_rows:
+            # Another worker won. Silent skip — they'll dispatch it.
+            continue
+        row = claimed_rows[0]
+
         try:
             seq_lookup = (
                 sb.table("drip_sequences")
@@ -536,6 +681,11 @@ def execution_tick(sb) -> int:
             )
         except Exception as e:
             _log(f"execution: drip_sequences read failed id={row.get('sequence_id')}: {e}")
+            # Release the claim so a future tick can retry the lookup.
+            try:
+                sb.rpc("release_sequence_state_claim", {"row_id": row["id"]}).execute()
+            except Exception:
+                pass
             continue
         if not seq_lookup.data:
             # Sequence deleted while a state row was scheduled. Cancel.
@@ -588,6 +738,12 @@ def execution_tick(sb) -> int:
                     "last_attempt_at": now,
                     "last_error": detail,
                     "scheduled_for": next_scheduled.isoformat(),
+                    # Release the atomic claim so a future tick can
+                    # re-pick this row when cooldown lifts. Without
+                    # this, claimed_at stays set and the partial index
+                    # excludes the row from candidate_ids forever.
+                    "claimed_at": None,
+                    "claimed_by": None,
                 }).eq("id", row["id"]).execute()
             except Exception:
                 pass
@@ -644,6 +800,11 @@ def execution_tick(sb) -> int:
                         "last_attempt_at": now,
                         "last_error": detail,
                         "scheduled_for": next_scheduled,
+                        # Release the atomic claim so the retry path
+                        # can be picked up on the next tick — same
+                        # rationale as the cooldown branch above.
+                        "claimed_at": None,
+                        "claimed_by": None,
                     }).eq("id", row["id"]).execute()
                 except Exception:
                     pass
@@ -671,11 +832,33 @@ def tick() -> tuple[int, int]:
 def loop(interval: int) -> int:
     interval = max(1, int(interval))
     _log(f"sequence-runner up; tick interval = {interval}s")
+    # Round 3 R3-11: track repeated crashes so we don't flood
+    # CC's Telegram if the daemon is restart-looping. After the
+    # first 2 alerts in a 10-minute window, suppress until the
+    # window resets — the operator gets the signal without the noise.
+    crash_window_start = 0.0
+    crash_window_count = 0
+    CRASH_ALERT_LIMIT = 2
+    CRASH_ALERT_WINDOW_SEC = 600
     while True:
         try:
             tick()
         except Exception as e:
             _log(f"tick crashed: {e}")
+            now = time.time()
+            if now - crash_window_start > CRASH_ALERT_WINDOW_SEC:
+                crash_window_start = now
+                crash_window_count = 0
+            if crash_window_count < CRASH_ALERT_LIMIT:
+                crash_window_count += 1
+                try:
+                    # Import locally so a missing notify module doesn't
+                    # take down the daemon at boot — daemon resilience
+                    # over alert delivery.
+                    from notify import notify_daemon_crash  # type: ignore
+                    notify_daemon_crash("sequence-runner", str(e))
+                except Exception:
+                    pass
         try:
             time.sleep(interval)
         except KeyboardInterrupt:
