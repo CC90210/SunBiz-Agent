@@ -49,9 +49,9 @@ Ezra's profile (role, team, priorities, comm channels) lives in `brain/USER.md`.
 | What Solara may write / what requires Ezra confirmation | `brain/EXECUTION_RULES.md` | — |
 | Reasoning protocol / multi-hypothesis | `brain/BRAIN_LOOP.md` | — |
 | Lender portfolio / lender appetite profiles | `memory/LONG_TERM.md` (lender facts) | `memory/PATTERNS.md` (validated match patterns) |
-| Shop-out status on a specific deal | (run `python scripts/deal_tracker.py list --deal-id <id> --json`) | `brain/STATE.md` |
+| Shop-out status on a specific deal | Query Supabase: `python ~/Business-Empire-Agent/scripts/integrations/supabase_tool.py query "SELECT id, data->>'status' as status FROM tenant_records WHERE entity_type='application' AND id='<id>'"` | `brain/STATE.md` |
 | Renewal pipeline | (run `python scripts/renewal_reminder.py --window 30 --json`) | `brain/STATE.md` |
-| Commission calculation | (run `python scripts/funding_intel.py commission --deal-id <id>`) | — |
+| Commission calculation | Query `application_lender_threads` where `status='offer_received'` — see `brain/EXECUTION_RULES.md` §11. `(tenant_records via supabase_tool).py` + `(commission/renewal projections — Phase 6.6).py` are **Phase 6.6 — not yet implemented**. | — |
 | How the logging / audit trail works | `brain/INTERACTION_PROTOCOL.md` | — |
 | Capability growth / new skill candidates | `brain/GROWTH.md` | — |
 | What changed in this agent | `brain/CHANGELOG.md` | — |
@@ -63,22 +63,22 @@ Ezra's profile (role, team, priorities, comm channels) lives in `brain/USER.md`.
 
 | Ezra wants... | Tool / Script | Confirm Required? |
 |---|---|---|
-| Deal status / queue check | `python scripts/deal_tracker.py list --status <status> --json` | No |
+| Deal status / queue check | `python ~/Business-Empire-Agent/scripts/integrations/supabase_tool.py query "SELECT id, data->>'status' as status, data->>'business_name' as name FROM tenant_records WHERE entity_type='application' AND data->>'status'='<status>'"` | No |
 | Pre-screen an application | `python scripts/underwriting_orchestrator.py score --deal-id <id>` | No |
 | Submit application to lender(s) | `python scripts/shop_out_sender.py send --deal-id <id>` | **Yes — same turn** |
-| Mark deal funded | `python scripts/deal_tracker.py update --deal-id <id> --status funded` | **Yes — same turn** |
+| Mark deal funded | Update `tenant_records` via `python ~/Business-Empire-Agent/scripts/integrations/supabase_tool.py update tenant_records --eq '{"id":"<id>"}' --data '{"data":{"status":"funded"}}'` | **Yes — same turn** |
 | Renewal scan | `python scripts/renewal_reminder.py --window 30 --json` | No |
-| Commission calculation | `python scripts/funding_intel.py commission --deal-id <id>` | No |
+| Commission calculation | Query `application_lender_threads` directly — `(commission/renewal projections — Phase 6.6).py` is **Phase 6.6 — not yet implemented**. Use `python ~/Business-Empire-Agent/scripts/integrations/supabase_tool.py query "SELECT funded_amount, buy_rate FROM application_lender_threads WHERE status='offer_received' AND deal_id='<id>'"` | No |
 | Daily brief / call sheet | `python scripts/daily_plan_generator.py run --date today --json` | No |
-| Read Supabase table | `python scripts/supabase_tool.py select <table> --eq '{"tenant_id":"sunbiz"}' --limit 10` | No |
-| Write to Supabase | `python scripts/supabase_tool.py insert <table> --data '...'` | **Yes — mutating** |
+| Read Supabase table | `python ~/Business-Empire-Agent/scripts/integrations/supabase_tool.py query "SELECT * FROM <table> WHERE tenant_id='sunbiz' LIMIT 10"` | No |
+| Write to Supabase | `python ~/Business-Empire-Agent/scripts/integrations/supabase_tool.py insert <table> --data '...'` | **Yes — mutating** |
 | Send email to merchant | `python scripts/send_gateway.py send --channel email ...` | **Yes — outbound** |
 | Send SMS to merchant | `python scripts/send_gateway.py send --channel sms ...` | **Yes — outbound** |
 | Start drip sequence | `python scripts/sequence_runner.py start --lead-id <id> --sequence <name>` | **Yes — outbound** |
 | Generate follow-up draft | `python scripts/follow_up_generator.py draft --lead-id <id> --context "<context>"` | No (draft only) |
 | Post handoff to Helios | `python scripts/agent_inbox.py post --to helios --message "<msg>"` | No |
 | Check agent inbox | `python scripts/agent_inbox.py list --to solara` | No |
-| Heartbeat to V6 substrate | `python scripts/state_bridge.py heartbeat --agent solara` | No |
+| Heartbeat to V6 substrate | `python ~/Business-Empire-Agent/scripts/state/state_sync.py --agent solara --note "heartbeat"` | No |
 
 ---
 

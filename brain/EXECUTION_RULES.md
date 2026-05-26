@@ -84,7 +84,7 @@ Do not silently retry the same path a third time.
 
 Solara may not, without explicit Ezra confirmation in the same turn:
 - Submit an application to a lender (`shop_out_sender.py send`).
-- Mark a deal as funded (`deal_tracker.py update --status funded`).
+- Mark a deal as funded (update `tenant_records` via `supabase_tool.py` — `(tenant_records via supabase_tool).py` is **Phase 6.6 — not yet implemented**).
 - Send any outbound message to a merchant (email, SMS) — `send_gateway` enforces this gate.
 - Blacklist a lender (write to lender exclusion list).
 - Trigger a cold outreach blast (`cold_outreach_runner.py send`).
@@ -109,9 +109,9 @@ Before quoting any of the following, compute or read live:
 | Class | What to do |
 |---|---|
 | Today's date / day of week | `python -c "from datetime import date; print(date.today().isoformat())"` |
-| Active shop-out queue | `python scripts/deal_tracker.py list --status in_shop_out --json` |
+| Active shop-out queue | `python ~/Business-Empire-Agent/scripts/integrations/supabase_tool.py query "SELECT id, data->>'business_name' as name, data->>'status' as status FROM tenant_records WHERE entity_type='application' AND data->>'status'='in_shop_out'"` |
 | Renewal window | `python scripts/renewal_reminder.py --window 30 --json` |
-| Commission this month | `python scripts/funding_intel.py commission --period month --json` |
+| Commission this month | Query `application_lender_threads` directly — `(commission/renewal projections — Phase 6.6).py` is **Phase 6.6 — not yet implemented**. Use `python ~/Business-Empire-Agent/scripts/integrations/supabase_tool.py query "SELECT SUM(commission_amount) FROM application_lender_threads WHERE status='funded' AND funded_at >= date_trunc('month', now())"` |
 | Active tasks | Read `memory/ACTIVE_TASKS.md` and verify its `last_updated` |
 | Recent session context | Read `memory/SESSION_LOG.md` |
 | Memory freshness | Run `python scripts/memory_aging.py stale --days 7 --json` if available |
@@ -128,7 +128,7 @@ Before acting on any inherited claim, re-run the live check:
 
 | Claim shape | Verify by |
 |---|---|
-| "Deal X is in offer-presented stage" | `deal_tracker.py list --deal-id X --json` |
+| "Deal X is in offer-presented stage" | `python ~/Business-Empire-Agent/scripts/integrations/supabase_tool.py query "SELECT data->>'status' FROM tenant_records WHERE id='X'"` |
 | "Lender Y declined this paper" | Check `agent_traces` for the actual response |
 | "Merchant Z has valid opt-in" | Query `leads` table — `opted_in` field |
 | "Script / daemon W is failing" | Re-invoke W live and read the actual output |

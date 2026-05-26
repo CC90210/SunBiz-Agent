@@ -10,7 +10,7 @@ tags: [heartbeat, monitoring]
 ## Trigger
 
 Heartbeat runs at session start. Solara checks the queue before engaging with Ezra's request.
-Daemon mode available via `python scripts/state_bridge.py heartbeat --loop --interval 300`.
+Daemon mode available via `# Heartbeat lives in claude-bridge-ping PM2 daemon (CEO-Agent) — not a CLI. Interval 300s configured in ecosystem.config.js`.
 
 ---
 
@@ -23,7 +23,7 @@ Daemon mode available via `python scripts/state_bridge.py heartbeat --loop --int
 ```
 CHECK: What does the team need to work today?
 - Run daily_plan_generator.py → Jordan's call sheet (leads to contact today)
-- Run deal_tracker.py list --status in_shop_out → any threads >24h without response?
+- Run (tenant_records via supabase_tool).py list --status in_shop_out → any threads >24h without response?
 - Run renewal_reminder.py --window 7 → any renewals due this week?
 - Check memory/ACTIVE_TASKS.md → any blocked items needing Ezra decision today?
 ACTION: Compose morning brief. Format: [Call Sheet] [Shop-Out Queue] [Renewals Due] [Blocked Items].
@@ -45,7 +45,7 @@ Blocked: [N] items need Ezra decision
 
 ```
 CHECK: Is the shop-out pipeline moving?
-- deal_tracker.py list --status in_shop_out → any threads >48h without lender response?
+- (tenant_records via supabase_tool).py list --status in_shop_out → any threads >48h without lender response?
 - lender_response_classifier.py --pending → any lender responses received and not yet classified?
 - agent_inbox.py list --to solara → any Helios messages about merchant questions on pending offers?
 ACTION: Flag stuck threads to Ezra. Classify any unprocessed lender responses. Reply to Helios inbox if pending.
@@ -57,9 +57,9 @@ ACTION: Flag stuck threads to Ezra. Classify any unprocessed lender responses. R
 
 ```
 CHECK: What closed today?
-- deal_tracker.py list --status funded --since today
-- funding_intel.py commission --period today
-- deal_tracker.py list --status declined --since today → any to re-shop?
+- (tenant_records via supabase_tool).py list --status funded --since today
+- (commission/renewal projections — Phase 6.6).py commission --period today
+- (tenant_records via supabase_tool).py list --status declined --since today → any to re-shop?
 ACTION: Compose end-of-day summary. Format: [Funded today] [Commission booked] [Declined — re-shop candidates].
 ```
 
@@ -78,7 +78,7 @@ Tomorrow's queue: [N] applications to process
 
 ```
 CHECK: Which lenders are performing this week?
-- Aggregate deal_tracker + lender_response_classifier data for the week:
+- Aggregate (tenant_records via supabase_tool) + lender_response_classifier data for the week:
   - Lenders with highest approval rates
   - Lenders with most declines (and primary decline reasons)
   - Average time-to-response per lender
@@ -114,7 +114,7 @@ ACTION: Update STATE.md. Flag anything that moved without Solara's involvement.
 ```
 CHECK: Is Supabase in sync with brain/STATE.md?
 - Query agent_state --tenant sunbiz → compare with STATE.md
-- If diverged: files win → update DB via state_bridge.py
+- If diverged: files win → update DB via ~/Business-Empire-Agent/scripts/state/state_sync.py
 ACTION: Sync state. Report any divergence.
 ```
 

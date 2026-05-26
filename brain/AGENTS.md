@@ -29,7 +29,7 @@ tags: [agents, registry]
 
 | Agent | Relationship | Solara's Posture |
 |-------|-------------|-----------------|
-| **Bravo** (CEO-Agent) | Parent substrate | Reads V6 substrate from Business-Empire-Agent. Writes only through sanctioned helpers (state_bridge, send_gateway, agent_inbox). Does NOT edit Bravo's files. |
+| **Bravo** (CEO-Agent) | Parent substrate | Reads V6 substrate from Business-Empire-Agent. Writes only through sanctioned helpers (`~/Business-Empire-Agent/scripts/state/state_sync.py`, `send_gateway`, `agent_inbox`). Does NOT edit Bravo's files. |
 | **Atlas** (CFO-Agent) | Budget authority | Surfaces spend decisions above threshold; Atlas approves. Does not interact directly in day-to-day. |
 | **Maven** (CMO-Agent) | CC's content domain | No overlap. SunBiz brand voice is Ezra's domain, not Maven's. |
 | **Helios** | Sibling | Solara stages deals and drafts merchant touches; Helios executes them. Handoffs via `agent_inbox.py post --to helios`. |

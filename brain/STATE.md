@@ -6,7 +6,7 @@ tags: [state, ephemeral]
 
 > Single-tenant. Updated by Solara at session end. Read at session start.
 > Ephemeral: body changes every session. Structure changes rarely.
-> For live DB state: `python scripts/state_bridge.py status --json`
+> For live DB state: `python ~/Business-Empire-Agent/scripts/state/state_manager.py status --json`
 
 ---
 
@@ -33,7 +33,7 @@ tags: [state, ephemeral]
 
 ## Active Shop-Out Queue
 
-> Populate with live deal IDs at session start via `python scripts/deal_tracker.py list --status in_shop_out --json`
+> Populate with live deal IDs at session start via `python ~/Business-Empire-Agent/scripts/integrations/supabase_tool.py query \"SELECT id, data->>'business_name' AS name, data->>'status' AS status FROM tenant_records WHERE tenant_id = (SELECT id FROM tenants WHERE slug='submissions') AND entity_type IN ('application', 'funded_deal') AND data->>'status'='in_shop_out'\" --json`
 
 | Deal ID | Merchant | Submitted To | Submitted At | Status | Notes |
 |---------|----------|--------------|--------------|--------|-------|
@@ -55,7 +55,7 @@ tags: [state, ephemeral]
 
 ## This Week's Funded Deals
 
-> Updated end-of-day via `python scripts/deal_tracker.py list --status funded --since monday --json`
+> Updated end-of-day via `python ~/Business-Empire-Agent/scripts/integrations/supabase_tool.py query \"SELECT id, data->>'business_name' AS name FROM tenant_records WHERE tenant_id = (SELECT id FROM tenants WHERE slug='submissions') AND entity_type IN ('application', 'funded_deal') AND data->>'status'='funded'\" --since monday --json`
 
 | Deal ID | Merchant | Lender | Amount | Factor Rate | Commission | Funded Date |
 |---------|----------|--------|--------|-------------|------------|-------------|

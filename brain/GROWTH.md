@@ -21,20 +21,20 @@ tags: [growth, evolution]
 | Skill | Acquired | Uses | Status | Composites |
 |-------|----------|------|--------|------------|
 | MCA compliance gating | 2026-05-11 | 3+ | `[VALIDATED]` | TCPA check + CASL check + language filter |
-| Deal lifecycle CRUD | 2026-05-11 | 3+ | `[VALIDATED]` | deal_tracker + supabase_tool |
+| Deal lifecycle CRUD | 2026-05-11 | 3+ | `[VALIDATED]` | supabase_tool (direct `tenant_records` queries — `(tenant_records via supabase_tool).py` is Phase 6.6) |
 | Lender response classification | 2026-05-12 | 1 | `[PROBATIONARY]` | lender_response_classifier + decision tree |
 | Renewal window scanning | 2026-05-12 | 1 | `[PROBATIONARY]` | renewal_reminder + sequence_runner |
-| V6 substrate heartbeat | 2026-05-25 | 0 | `[PROBATIONARY]` | state_bridge + agent_events bus |
+| V6 substrate heartbeat | 2026-05-25 | 0 | `[PROBATIONARY]` | `~/Business-Empire-Agent/scripts/state/state_sync.py` + agent_events bus |
 | Brain-first reasoning loop | 2026-05-25 | 0 | `[PROBATIONARY]` | BRAIN_LOOP 10-step + Reflexion protocol |
 
 ## Skill Compositionality (Voyager Pattern)
 
 Complex skills are built from simpler ones:
 ```
-Shop-Out Flow = underwriting_orchestrator + shop_out_sender + lender_response_classifier + deal_tracker
+Shop-Out Flow = underwriting_orchestrator + shop_out_sender + lender_response_classifier + (tenant_records via supabase_tool)
 Renewal Pipeline = renewal_reminder + follow_up_generator + send_gateway + sequence_runner
 Merchant Drip = sequence_runner + follow_up_generator + send_gateway (TCPA gate)
-Daily Brief = daily_plan_generator + renewal_reminder + deal_tracker (in_shop_out filter)
+Daily Brief = daily_plan_generator + renewal_reminder + supabase_tool (in_shop_out filter — (tenant_records via supabase_tool).py is Phase 6.6)
 ```
 
 When building new skills, check whether existing scripts can be composed before writing new ones.
@@ -46,8 +46,8 @@ These are skill gaps that have surfaced but are not yet built or validated:
 | Candidate Skill | Description | Priority | Depends On |
 |----------------|-------------|----------|------------|
 | **known-funder pattern learning** | Per-lender appetite profile that updates after each approval/decline — industry, revenue band, position count tolerance, preferred paper type | HIGH | lender_response_classifier (needs 10+ decisions to train) |
-| **deal-profile clustering** | Groups funded deals by profile similarity to predict which lender tier fits next application | MEDIUM | deal_tracker (needs funded history) |
-| **drip-cadence A/B** | Tracks which follow-up sequence (timing, channel, copy template) produces higher application-to-funded rate | MEDIUM | sequence_runner + deal_tracker outcome join |
+| **deal-profile clustering** | Groups funded deals by profile similarity to predict which lender tier fits next application | MEDIUM | supabase_tool (query funded `tenant_records`) — Phase 6.6, depends on commission projection rollout |
+| **drip-cadence A/B** | Tracks which follow-up sequence (timing, channel, copy template) produces higher application-to-funded rate | MEDIUM | sequence_runner + supabase_tool (outcome join on `tenant_records`) |
 | **lender-portal scrape adapters** | Per-lender portal DOM scrapers for submission status checks (for lenders without email confirmations) | LOW | Playwright MCP + lender_response_classifier |
 | **stacking-risk scorer** | Given merchant's existing positions (count, total daily obligations), score the stacking risk before any submission | HIGH | underwriting_orchestrator extension |
 

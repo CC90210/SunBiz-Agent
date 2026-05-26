@@ -41,7 +41,7 @@ last_updated: 2026-05-25
 **Trigger:** "Shop this deal" / "Submit [deal ID] to lenders" / "Start the shop-out on [merchant]."
 
 **Preconditions:**
-1. Application exists and is complete. Run: `python scripts/deal_tracker.py list --deal-id <id> --json` — check `status=applied` and required docs present.
+1. Application exists and is complete. Run: `# Query via dashboard API: GET /api/manifest/sun/records/application?id=<id> OR direct SQL: python ~/Business-Empire-Agent/scripts/integrations/supabase_tool.py query \"SELECT * FROM tenant_records WHERE id='<id>'\" --json` — check `status=applied` and required docs present.
 2. Pre-screen passes. Run: `python scripts/underwriting_orchestrator.py score --deal-id <id>` — review TAR band and stacking risk score.
 3. Stacking risk is within threshold (position count ≤ lender tolerance). If score flags stacking risk → escalate to Ezra before proceeding.
 
@@ -50,11 +50,11 @@ last_updated: 2026-05-25
 2. Present ranked lender list to Ezra: `python scripts/shop_out_sender.py plan --deal-id <id>` — shows recommended lenders, estimated approval probability, relationship cost.
 3. Ezra confirms target lender(s) in same turn.
 4. After confirmation: `python scripts/shop_out_sender.py send --deal-id <id> --lenders "<lender1>,<lender2>"`
-5. Update deal state: `python scripts/deal_tracker.py update --deal-id <id> --status in_shop_out`
+5. Update deal state: `# Update via dashboard API: PATCH /api/manifest/sun/records/application/<id> with body {data: {status: 'in_shop_out'}} (no direct DB write — keeps audit log clean)`
 6. Log submission to `agent_traces`.
 
 **Verification:**
-- `python scripts/deal_tracker.py list --deal-id <id>` → status = `in_shop_out`.
+- `# Query via dashboard API: GET /api/manifest/sun/records/application?id=<id> (see ARCHITECTURE.md for the API surface)` → status = `in_shop_out`.
 - `python scripts/shop_out_sender.py status --deal-id <id>` → submission timestamp confirmed per lender.
 
 **Confirmation to Ezra:** "Deal <id> submitted to [lenders] at [timestamp]. Expecting response within [lender's typical window]. Tracking."
@@ -71,7 +71,7 @@ last_updated: 2026-05-25
 
 **Action:**
 1. `python scripts/underwriting_orchestrator.py score --deal-id <id> --json`
-2. `python scripts/funding_intel.py tar-band --deal-id <id> --json`
+2. `# Phase 6.6 — tar-band classification (A/B/C/D paper) lives in the Underwriting Agent's sales_angle output. Pull via: python ~/Business-Empire-Agent/scripts/integrations/supabase_tool.py query \"SELECT sales_angle FROM application_underwriting WHERE application_id='<id>' ORDER BY run_at DESC LIMIT 1\" --json`
 3. Compose score summary:
    - TAR band (A/B/C/D)
    - Stacking risk (position count vs. lender tolerance)
@@ -102,7 +102,7 @@ Ready to shop: [YES / NO — reason if no]
 2. Offer terms are available: advance amount, factor rate, holdback %, payback period, ACH vs lockbox.
 
 **Action:**
-1. Pull offer terms: `python scripts/deal_tracker.py list --deal-id <id> --json` → `offers` array.
+1. Pull offer terms: `# Query via dashboard API: GET /api/manifest/sun/records/application?id=<id> OR direct SQL: python ~/Business-Empire-Agent/scripts/integrations/supabase_tool.py query \"SELECT * FROM tenant_records WHERE id='<id>'\" --json` → `offers` array.
 2. Spawn `offer-formatter` sub-agent: format terms into compliant merchant-facing language (no "loan," no factor rate % as a rate, daily payment + total payback framing).
 3. Draft email via `follow_up_generator.py draft --lead-id <id> --context "offer_presented" --offer-id <offer_id>`.
 4. Review draft for compliance (no banned language, no approval guarantees).
@@ -127,11 +127,11 @@ Ready to shop: [YES / NO — reason if no]
 3. Original deal terms on file (advance amount, factor rate, payback date).
 
 **Action:**
-1. Generate renewal proposal parameters: `python scripts/funding_intel.py renewal-estimate --deal-id <id>` (estimates renewal amount based on remaining balance + typical renewal terms).
+1. Generate renewal proposal parameters: `# Phase 6.6 — renewal estimate is computed page-load by the dashboard's Renewals tab (see renewals_v2 in lib/manifest/seeds.ts). No CLI yet; query funded_deal + compute (funded_amount * 1.10) - remaining_balance as a first-pass estimate.` (estimates renewal amount based on remaining balance + typical renewal terms).
 2. Draft renewal outreach: `python scripts/follow_up_generator.py draft --lead-id <id> --context "renewal"`.
 3. Confirm draft with Ezra or route to Helios.
 4. After approval: `python scripts/send_gateway.py send --channel email --template renewal_v1 --lead-id <id>` (send_gateway enforces TCPA/CASL).
-5. Update deal state: `python scripts/deal_tracker.py update --deal-id <id> --status renewal_outreach_sent`.
+5. Update deal state: `# Update via dashboard API: PATCH /api/manifest/sun/records/application/<id> with body {data: {status: 'renewal_outreach_sent'}} (no direct DB write — keeps audit log clean)`.
 
 **Verification:**
 - `send_gateway.py` returns send confirmation (message ID, timestamp).
@@ -150,7 +150,7 @@ Ready to shop: [YES / NO — reason if no]
 - At least one of these is true: (a) no lender response in >72h, (b) all lenders declined, (c) stacking risk threshold exceeded before submission.
 
 **Action:**
-1. Pull full deal context: `python scripts/deal_tracker.py list --deal-id <id> --json`
+1. Pull full deal context: `# Query via dashboard API: GET /api/manifest/sun/records/application?id=<id> OR direct SQL: python ~/Business-Empire-Agent/scripts/integrations/supabase_tool.py query \"SELECT * FROM tenant_records WHERE id='<id>'\" --json`
 2. Pull submission history and lender responses from `agent_traces`.
 3. If all declined: spawn `decline-analyst` sub-agent to generate root cause analysis.
 4. Compose escalation summary for Ezra:

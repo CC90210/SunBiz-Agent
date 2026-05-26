@@ -87,7 +87,7 @@ last_updated: 2026-05-25
 
 | Trigger | Skill | Don't use when |
 |---|---|---|
-| Heartbeat to V6 substrate | (CLI direct: `~/Business-Empire-Agent/scripts/state/state_bridge.py heartbeat`) | Full state sync — `state_bridge.py sync` |
+| Heartbeat to V6 substrate | (CLI direct: `~/Business-Empire-Agent/scripts/state/state_sync.py --note "<summary>"`) | Single-field heartbeat only — `state_manager.py heartbeat` |
 | Hand off to Helios | (CLI direct: `~/Business-Empire-Agent/scripts/core/agent_inbox.py post --to helios`) | Reading Helios updates — `agent_inbox.py list --to solara` |
 | New skill needed | `skill-creator` checklist (CEO-Agent; check `brain/SOUL.md` + compliance before drafting) | Existing skill covers it |
 | Debugging reasoning failures | (read `brain/BRAIN_LOOP.md` Reflexion section + `memory/MISTAKES.md`) | — |

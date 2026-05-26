@@ -88,14 +88,14 @@ Solara has access to these; Helios has a separate, outreach-focused palette.
 | `sequence_runner.py` | Drip sequence engine | Fully autonomous |
 | `sms_engine.py` | Single SMS send | CASL gate must pass first |
 | `email_blast.py` | Campaign blast | CASL gate must pass first; `--dry-run` first |
-| `~/Business-Empire-Agent/scripts/supabase_tool.py` | Read/write deal state, lender profiles, merchant records | Always pass `--tenant sunbiz`; script lives in CEO-Agent |
-| `~/Business-Empire-Agent/scripts/send_gateway.py` | Compliant email/SMS send | Gateway enforces TCPA/CASL — do not bypass; script lives in CEO-Agent |
+| `~/Business-Empire-Agent/scripts/integrations/supabase_tool.py` | Read/write deal state, lender profiles, merchant records | Always pass `--tenant sunbiz`; script lives in CEO-Agent |
+| `~/Business-Empire-Agent/scripts/integrations/send_gateway.py` | Compliant email/SMS send | Gateway enforces TCPA/CASL — do not bypass; script lives in CEO-Agent |
 | `~/Business-Empire-Agent/scripts/core/agent_inbox.py` | Handoffs to Helios or messages to Bravo | Read freely; post requires confirmation; script lives in CEO-Agent |
-| `~/Business-Empire-Agent/scripts/state/state_bridge.py` | Heartbeat to V6 substrate | Autonomous (session start/end); script lives in CEO-Agent |
+| `~/Business-Empire-Agent/scripts/state/state_sync.py` | Session-end state sync to V6 substrate | Autonomous (session start/end); script lives in CEO-Agent |
 | `~/Business-Empire-Agent/scripts/core/memory_retriever.py` | Search brain/memory files | Autonomous; script lives in CEO-Agent |
 
 **What Solara does NOT use directly:**
-- Raw `send_sms` without CASL gate — always routed through `send_gateway.py` (CEO-Agent).
+- Raw `send_sms` without CASL gate — always routed through `integrations/send_gateway.py` (CEO-Agent).
 - Raw bash subprocess calls in daemon-spawned code — use `safe_run()` from `_subprocess_helpers.py`.
 - Helios-specific tools (outbound cold call scripts, meeting-setter sequences).
 
@@ -146,11 +146,11 @@ Renewal (renewal_reminder.py once → sequence_runner.py once renewal_sequence)
 
 | Gate | Enforced By | Blocks On |
 |------|-------------|-----------|
-| TCPA opt-in check | `send_gateway.py` (CEO-Agent) | SMS to any number without verified opt-in |
-| CASL consent check | `send_gateway.py` (CEO-Agent) | Email to CA-based merchant without consent |
+| TCPA opt-in check | `integrations/send_gateway.py` (CEO-Agent) | SMS to any number without verified opt-in |
+| CASL consent check | `integrations/send_gateway.py` (CEO-Agent) | Email to CA-based merchant without consent |
 | CAN-SPAM footer | `email_blast.py` | Any email missing unsubscribe mechanism |
-| Quiet hours | `send_gateway.py` (CEO-Agent) | Outbound outside 8am-9pm merchant local time |
-| "Loan" language gate | Draft critic in `send_gateway.py` (CEO-Agent) | Any outbound using banned terminology |
+| Quiet hours | `integrations/send_gateway.py` (CEO-Agent) | Outbound outside 8am-9pm merchant local time |
+| "Loan" language gate | Draft critic in `integrations/send_gateway.py` (CEO-Agent) | Any outbound using banned terminology |
 | Stacking risk flag | `underwriting_orchestrator.py` | Submission when position count exceeds lender threshold |
 
 ## Obsidian Links
