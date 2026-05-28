@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -34,9 +35,37 @@ from pathlib import Path
 from typing import Any
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent  # SunBiz-Agent root
 STATE_DIR = REPO_ROOT / "state"
 LOG_PATH = STATE_DIR / "underwriting_orchestrator.log"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# CEO-Agent runtime — lib.secret_loader lives in CEO-Agent/scripts/.
+# See sequence_runner.py for the rationale of this bootstrap.
+# Local SunBiz submodules (underwriting/*) stay on REPO_ROOT path.
+# ─────────────────────────────────────────────────────────────────────
+
+
+def _resolve_bravo_root() -> Path | None:
+    env = os.environ.get("BRAVO_AGENT_ROOT")
+    candidates: list[Path] = []
+    if env:
+        candidates.append(Path(env))
+    candidates.append(Path.home() / "CEO-Agent")
+    if os.name == "nt":
+        candidates.append(Path("C:/Users/User/Business-Empire-Agent"))
+    for c in candidates:
+        if (c / "scripts").is_dir():
+            return c
+    return None
+
+
+BRAVO_ROOT = _resolve_bravo_root()
+if BRAVO_ROOT is not None:
+    _bravo_scripts = str(BRAVO_ROOT / "scripts")
+    if _bravo_scripts not in sys.path:
+        sys.path.insert(0, _bravo_scripts)
 
 # How long a 'pending' row must sit before this daemon claims it.
 # Gives the dashboard's INSERT time to commit and the operator a
@@ -69,15 +98,13 @@ def _log(msg: str) -> None:
 
 
 def _supabase():
-    """Service-role Supabase client. Returns None on any failure."""
+    """Service-role Supabase client. Returns None on any failure.
+    lib.secret_loader lives in CEO-Agent/scripts/ (added to sys.path
+    at module load via BRAVO_ROOT bootstrap)."""
     try:
         from lib.secret_loader import load_env  # type: ignore
     except Exception:
-        sys.path.insert(0, str(REPO_ROOT / "scripts"))
-        try:
-            from lib.secret_loader import load_env  # type: ignore
-        except Exception:
-            return None
+        return None
     try:
         env = load_env()
     except Exception:

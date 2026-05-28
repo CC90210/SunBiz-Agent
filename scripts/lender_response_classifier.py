@@ -50,9 +50,38 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent  # SunBiz-Agent root
 STATE_DIR = REPO_ROOT / "state"
 LOG_PATH = STATE_DIR / "lender_response_classifier.log"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# CEO-Agent runtime — see sequence_runner.py for the rationale of this
+# bootstrap. lib.secret_loader + integrations/google_tool.py live in
+# CEO-Agent; we resolve its root via BRAVO_AGENT_ROOT env var first,
+# then probe ~/CEO-Agent and the Windows location.
+# ─────────────────────────────────────────────────────────────────────
+
+
+def _resolve_bravo_root() -> Path | None:
+    env = os.environ.get("BRAVO_AGENT_ROOT")
+    candidates: list[Path] = []
+    if env:
+        candidates.append(Path(env))
+    candidates.append(Path.home() / "CEO-Agent")
+    if os.name == "nt":
+        candidates.append(Path("C:/Users/User/Business-Empire-Agent"))
+    for c in candidates:
+        if (c / "scripts").is_dir():
+            return c
+    return None
+
+
+BRAVO_ROOT = _resolve_bravo_root()
+if BRAVO_ROOT is not None:
+    _bravo_scripts = str(BRAVO_ROOT / "scripts")
+    if _bravo_scripts not in sys.path:
+        sys.path.insert(0, _bravo_scripts)
 
 # Look back this far when scanning Gmail threads on each poll. Older
 # threads are presumed already-classified or no_response (and would
@@ -82,7 +111,6 @@ def _log(msg: str) -> None:
 
 def _supabase():
     try:
-        sys.path.insert(0, str(REPO_ROOT / "scripts"))
         from lib.secret_loader import load_env  # type: ignore
     except Exception:
         return None
@@ -106,7 +134,6 @@ def _supabase():
 
 def _load_env_var(name: str) -> str:
     try:
-        sys.path.insert(0, str(REPO_ROOT / "scripts"))
         from lib.secret_loader import load_env  # type: ignore
         return (load_env().get(name) or os.environ.get(name) or "").strip()
     except Exception:
@@ -194,13 +221,17 @@ def fetch_thread_latest_body(thread_id: str) -> str | None:
     """
     if not thread_id:
         return None
+    if BRAVO_ROOT is None:
+        _log("gmail fetch skipped: BRAVO_AGENT_ROOT unresolved (CEO-Agent not found)")
+        return None
+    google_tool_path = BRAVO_ROOT / "scripts" / "integrations" / "google_tool.py"
     # Windows-only flag — on POSIX it's not defined and we just pass 0.
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
         proc = subprocess.run(
             [
                 sys.executable,
-                str(REPO_ROOT / "scripts" / "google_tool.py"),
+                str(google_tool_path),
                 "gmail",
                 "thread-latest",
                 "--thread-id",
