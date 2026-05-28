@@ -42,6 +42,20 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# Phone DNC check — operator-initiated single sends still must respect STOP.
+# Blasts (cmd_blast) hit TT-side list_ids whose membership we don't own; rely
+# on TT's own STOP honoring there. casl_compliance is the universal helper
+# that ships with CEO-Agent (every tenant runtime imports it the same way).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+_bravo_root = Path(os.environ.get("BRAVO_AGENT_ROOT", str(Path.home() / "CEO-Agent")))
+if (_bravo_root / "scripts").is_dir():
+    sys.path.insert(0, str(_bravo_root / "scripts"))
+try:
+    from casl_compliance import should_suppress_phone
+except Exception:  # pragma: no cover — keep tool usable if casl module breaks
+    def should_suppress_phone(_phone):
+        return False
+
 try:
     import requests
 except ImportError:
@@ -175,7 +189,16 @@ def cmd_blast(args) -> dict:
 def cmd_send(args) -> dict:
     """Send to a single E.164 number. TextTorrent picks the
     matching-area-code outbound number automatically when the lead's
-    number falls in a region TT has purchased presence for."""
+    number falls in a region TT has purchased presence for.
+
+    Refuses to dispatch to a number on the local DNC CSV — STOP is a
+    channel-level opt-out and applies to operator-initiated CLI sends
+    just as it does to autonomous drips through send_gateway.
+    """
+    if should_suppress_phone(args.to):
+        return {"status": "suppressed",
+                "reason": f"{args.to} is on the SMS DNC list",
+                "to": args.to}
     body = {"to": args.to, "message": args.message}
     if args.from_label:
         body["from_label"] = args.from_label
