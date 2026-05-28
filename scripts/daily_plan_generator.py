@@ -57,6 +57,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 STATE_DIR = REPO_ROOT / "state"
 LOG_PATH = STATE_DIR / "daily_plan_generator.log"
 
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+from _bravo_bootstrap import bootstrap_bravo_path  # noqa: E402
+
+BRAVO_ROOT = bootstrap_bravo_path()
+
 DAEMON_NAME = "daily_plan_generator"
 
 PRIORITY_CALL_LIMIT = 5
@@ -92,7 +97,6 @@ def _log(msg: str) -> None:
 
 def _load_env() -> dict[str, str]:
     try:
-        sys.path.insert(0, str(REPO_ROOT / "scripts"))
         from lib.secret_loader import load_env  # type: ignore
         return load_env()
     except Exception:

@@ -92,6 +92,15 @@ from typing import Any, Optional
 REPO_ROOT = Path(__file__).resolve().parent.parent
 STATE_DIR = REPO_ROOT / "state"
 LOG_PATH = STATE_DIR / "shop_out_sender.log"
+
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+from _bravo_bootstrap import bootstrap_bravo_path  # noqa: E402
+
+# CEO-Agent runtime probe — see _bravo_bootstrap.py. Adds
+# CEO-Agent/scripts/ to sys.path so the cross-repo imports
+# (lib.secret_loader, integrations.send_gateway) resolve.
+BRAVO_ROOT = bootstrap_bravo_path()
+
 MAX_ATTEMPTS = 3
 DEFAULT_BATCH = 5
 DEFAULT_INTERVAL_SECONDS = 60
@@ -100,15 +109,13 @@ DEFAULT_INTERVAL_SECONDS = 60
 # ─── Supabase client (service role) ─────────────────────────────────
 
 def _supabase():
-    """Service-role client. Returns None on any failure (caller bails)."""
+    """Service-role client. Returns None on any failure (caller bails).
+    lib.secret_loader lives in CEO-Agent/scripts/ (on sys.path via the
+    BRAVO_ROOT bootstrap)."""
     try:
         from lib.secret_loader import load_env  # type: ignore
     except Exception:
-        sys.path.insert(0, str(REPO_ROOT / "scripts"))
-        try:
-            from lib.secret_loader import load_env  # type: ignore
-        except Exception:
-            return None
+        return None
     try:
         env = load_env()
     except Exception:
@@ -131,18 +138,14 @@ def _supabase():
 
 def _send_gateway():
     """Import send_gateway.send lazily so this file is importable in
-    environments without smtp / casl deps (e.g. for unit tests)."""
-    sys.path.insert(0, str(REPO_ROOT / "scripts"))
-    sys.path.insert(0, str(REPO_ROOT / "scripts" / "integrations"))
+    environments without smtp / casl deps (e.g. for unit tests).
+    send_gateway lives in CEO-Agent/scripts/integrations/ (on sys.path
+    via the BRAVO_ROOT bootstrap)."""
     try:
-        from integrations import send_gateway  # type: ignore
-        return send_gateway.send
+        from integrations.send_gateway import send  # type: ignore
+        return send
     except Exception:
-        try:
-            import send_gateway  # type: ignore
-            return send_gateway.send
-        except Exception:
-            return None
+        return None
 
 
 # ─── Storage download ───────────────────────────────────────────────

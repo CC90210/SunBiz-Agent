@@ -56,30 +56,25 @@ def underwriting_run(
     if triggered_by not in {"manual", "rerun", "chat", "automatic"}:
         triggered_by = "manual"
 
-    # Resolve CEO-Agent runtime root (for the shared secret_loader +
-    # universal infra). BRAVO_AGENT_ROOT env var wins; otherwise probe
-    # the two canonical locations CC uses (Mac/Linux ~/CEO-Agent vs
-    # Windows C:\Users\User\Business-Empire-Agent).
-    bravo_root_env = os.environ.get("BRAVO_AGENT_ROOT")
-    bravo_candidates: list[Path] = []
-    if bravo_root_env:
-        bravo_candidates.append(Path(bravo_root_env))
-    bravo_candidates.append(Path.home() / "CEO-Agent")
-    if os.name == "nt":
-        bravo_candidates.append(Path("C:/Users/User/Business-Empire-Agent"))
-    bravo_root = next((c for c in bravo_candidates if (c / "scripts").is_dir()), None)
+    # Resolve CEO-Agent runtime root via the shared bootstrap helper.
+    # bootstrap_bravo_path also adds CEO-Agent/scripts/ to sys.path so
+    # the cross-repo import below resolves.
+    sunbiz_scripts = str(Path(__file__).resolve().parent)
+    if sunbiz_scripts not in sys.path:
+        sys.path.insert(0, sunbiz_scripts)
+    from _bravo_bootstrap import bootstrap_bravo_path  # type: ignore
+    bravo_root = bootstrap_bravo_path()
     if bravo_root is None:
         return _err(
-            f"CEO-Agent runtime not found. Tried: {[str(c) for c in bravo_candidates]}. "
-            "Set BRAVO_AGENT_ROOT or clone CEO-Agent / Business-Empire-Agent next to SunBiz-Agent."
+            "CEO-Agent runtime not found. Set BRAVO_AGENT_ROOT or clone "
+            "CEO-Agent at ~/CEO-Agent (Mac/Linux) or "
+            "C:\\Users\\User\\Business-Empire-Agent (Windows)."
         )
     try:
         from supabase import create_client  # type: ignore
     except ImportError:
         return _err("supabase python client not installed in bridge env")
     try:
-        sys.path.insert(0, str(bravo_root))
-        sys.path.insert(0, str(bravo_root / "scripts"))
         from lib.secret_loader import load_env  # type: ignore
         env = load_env([
             "BRAVO_SUPABASE_URL",

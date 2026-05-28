@@ -47,19 +47,12 @@ from typing import Any
 # on TT's own STOP honoring there. casl_compliance is the universal helper
 # that ships with CEO-Agent (every tenant runtime imports it the same way).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-# casl_compliance lives in CEO-Agent/scripts/. Honor BRAVO_AGENT_ROOT
-# first, otherwise probe the two canonical CC locations.
-_bravo_env = os.environ.get("BRAVO_AGENT_ROOT")
-_bravo_candidates: list[Path] = []
-if _bravo_env:
-    _bravo_candidates.append(Path(_bravo_env))
-_bravo_candidates.append(Path.home() / "CEO-Agent")
-if os.name == "nt":
-    _bravo_candidates.append(Path("C:/Users/User/Business-Empire-Agent"))
-for _c in _bravo_candidates:
-    if (_c / "scripts").is_dir():
-        sys.path.insert(0, str(_c / "scripts"))
-        break
+# casl_compliance lives in CEO-Agent/scripts/. The shared bootstrap
+# helper handles CEO-Agent discovery + sys.path so the import below
+# resolves.
+from _bravo_bootstrap import bootstrap_bravo_path  # noqa: E402
+
+bootstrap_bravo_path()
 try:
     from casl_compliance import should_suppress_phone
 except Exception:  # pragma: no cover — keep tool usable if casl module breaks

@@ -63,36 +63,16 @@ STATE_DIR = REPO_ROOT / "state"
 CURSOR_PATH = STATE_DIR / "sequence_runner.cursor"
 LOG_PATH = STATE_DIR / "sequence_runner.log"
 
+# Add SunBiz-Agent's scripts/ to sys.path so the cross-repo bootstrap
+# (_bravo_bootstrap.py) and any local sibling imports resolve.
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+from _bravo_bootstrap import bootstrap_bravo_path  # noqa: E402
 
-# ─────────────────────────────────────────────────────────────────────
-# CEO-Agent runtime — shared infra (secret_loader, send_gateway,
-# casl_compliance, google_tool) lives there. Honor BRAVO_AGENT_ROOT
-# env var first, then probe the two canonical CC locations
-# (~/CEO-Agent on Mac/Linux, C:\Users\User\Business-Empire-Agent on
-# Windows). Add its scripts/ to sys.path on module load so the
-# cross-repo imports below resolve without per-call sys.path edits.
-# ─────────────────────────────────────────────────────────────────────
-
-
-def _resolve_bravo_root() -> Path | None:
-    env = os.environ.get("BRAVO_AGENT_ROOT")
-    candidates: list[Path] = []
-    if env:
-        candidates.append(Path(env))
-    candidates.append(Path.home() / "CEO-Agent")
-    if os.name == "nt":
-        candidates.append(Path("C:/Users/User/Business-Empire-Agent"))
-    for c in candidates:
-        if (c / "scripts").is_dir():
-            return c
-    return None
-
-
-BRAVO_ROOT = _resolve_bravo_root()
-if BRAVO_ROOT is not None:
-    _bravo_scripts = str(BRAVO_ROOT / "scripts")
-    if _bravo_scripts not in sys.path:
-        sys.path.insert(0, _bravo_scripts)
+# Resolve CEO-Agent runtime and add its scripts/ to sys.path so the
+# shared infrastructure imports below — lib.secret_loader,
+# integrations.send_gateway, integrations.google_tool, casl_compliance —
+# work without per-call sys.path edits.
+BRAVO_ROOT = bootstrap_bravo_path()
 
 # Cap on retry attempts for a single sequence_state row. After this many
 # failed sends we permanently mark the row 'failed' and stop trying.

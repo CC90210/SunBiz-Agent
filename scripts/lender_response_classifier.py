@@ -54,34 +54,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent  # SunBiz-Agent root
 STATE_DIR = REPO_ROOT / "state"
 LOG_PATH = STATE_DIR / "lender_response_classifier.log"
 
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+from _bravo_bootstrap import bootstrap_bravo_path  # noqa: E402
 
-# ─────────────────────────────────────────────────────────────────────
-# CEO-Agent runtime — see sequence_runner.py for the rationale of this
-# bootstrap. lib.secret_loader + integrations/google_tool.py live in
-# CEO-Agent; we resolve its root via BRAVO_AGENT_ROOT env var first,
-# then probe ~/CEO-Agent and the Windows location.
-# ─────────────────────────────────────────────────────────────────────
-
-
-def _resolve_bravo_root() -> Path | None:
-    env = os.environ.get("BRAVO_AGENT_ROOT")
-    candidates: list[Path] = []
-    if env:
-        candidates.append(Path(env))
-    candidates.append(Path.home() / "CEO-Agent")
-    if os.name == "nt":
-        candidates.append(Path("C:/Users/User/Business-Empire-Agent"))
-    for c in candidates:
-        if (c / "scripts").is_dir():
-            return c
-    return None
-
-
-BRAVO_ROOT = _resolve_bravo_root()
-if BRAVO_ROOT is not None:
-    _bravo_scripts = str(BRAVO_ROOT / "scripts")
-    if _bravo_scripts not in sys.path:
-        sys.path.insert(0, _bravo_scripts)
+# CEO-Agent runtime probe — see _bravo_bootstrap.py. Adds
+# CEO-Agent/scripts/ to sys.path so lib.secret_loader and
+# integrations/google_tool.py resolve.
+BRAVO_ROOT = bootstrap_bravo_path()
 
 # Look back this far when scanning Gmail threads on each poll. Older
 # threads are presumed already-classified or no_response (and would

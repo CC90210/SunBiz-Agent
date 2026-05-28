@@ -43,13 +43,18 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
+from _bravo_bootstrap import bootstrap_bravo_path  # noqa: E402
 
-from lib import secret_loader  # noqa: E402
+# CEO-Agent runtime probe — adds CEO-Agent/scripts/ to sys.path so
+# lib.secret_loader resolves (it lives in CEO-Agent, not SunBiz).
+BRAVO_ROOT = bootstrap_bravo_path()
+
+from lib.secret_loader import load_env  # noqa: E402
 from supabase import create_client  # noqa: E402
 
 
 def load_client():
-    env = secret_loader.load_env(
+    env = load_env(
         ["BRAVO_SUPABASE_URL", "BRAVO_SUPABASE_SERVICE_ROLE_KEY"]
     )
     return create_client(

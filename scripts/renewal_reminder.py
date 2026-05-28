@@ -49,6 +49,13 @@ STATE_DIR = REPO_ROOT / "state"
 CURSOR_PATH = STATE_DIR / "renewal_reminder.cursor"
 LOG_PATH = STATE_DIR / "renewal_reminder.log"
 
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+from _bravo_bootstrap import bootstrap_bravo_path  # noqa: E402
+
+# CEO-Agent runtime probe — adds CEO-Agent/scripts/ to sys.path so
+# lib.secret_loader (and any other cross-repo imports) resolve.
+BRAVO_ROOT = bootstrap_bravo_path()
+
 DAEMON_NAME = "renewal_reminder"
 ALERT_COOLDOWN_DAYS = 7
 DEFAULT_THRESHOLD_PCT = 40
@@ -79,7 +86,6 @@ def _log(msg: str) -> None:
 
 def _load_env() -> dict[str, str]:
     try:
-        sys.path.insert(0, str(REPO_ROOT / "scripts"))
         from lib.secret_loader import load_env  # type: ignore
         return load_env()
     except Exception:

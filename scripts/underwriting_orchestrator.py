@@ -39,33 +39,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent  # SunBiz-Agent root
 STATE_DIR = REPO_ROOT / "state"
 LOG_PATH = STATE_DIR / "underwriting_orchestrator.log"
 
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+from _bravo_bootstrap import bootstrap_bravo_path  # noqa: E402
 
-# ─────────────────────────────────────────────────────────────────────
-# CEO-Agent runtime — lib.secret_loader lives in CEO-Agent/scripts/.
-# See sequence_runner.py for the rationale of this bootstrap.
+# CEO-Agent runtime probe — see _bravo_bootstrap.py. Adds
+# CEO-Agent/scripts/ to sys.path so lib.secret_loader resolves.
 # Local SunBiz submodules (underwriting/*) stay on REPO_ROOT path.
-# ─────────────────────────────────────────────────────────────────────
-
-
-def _resolve_bravo_root() -> Path | None:
-    env = os.environ.get("BRAVO_AGENT_ROOT")
-    candidates: list[Path] = []
-    if env:
-        candidates.append(Path(env))
-    candidates.append(Path.home() / "CEO-Agent")
-    if os.name == "nt":
-        candidates.append(Path("C:/Users/User/Business-Empire-Agent"))
-    for c in candidates:
-        if (c / "scripts").is_dir():
-            return c
-    return None
-
-
-BRAVO_ROOT = _resolve_bravo_root()
-if BRAVO_ROOT is not None:
-    _bravo_scripts = str(BRAVO_ROOT / "scripts")
-    if _bravo_scripts not in sys.path:
-        sys.path.insert(0, _bravo_scripts)
+BRAVO_ROOT = bootstrap_bravo_path()
 
 # How long a 'pending' row must sit before this daemon claims it.
 # Gives the dashboard's INSERT time to commit and the operator a

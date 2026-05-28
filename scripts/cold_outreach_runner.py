@@ -51,6 +51,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 STATE_DIR = REPO_ROOT / "state"
 LOG_PATH = STATE_DIR / "cold_outreach_runner.log"
 
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+from _bravo_bootstrap import bootstrap_bravo_path  # noqa: E402
+
+BRAVO_ROOT = bootstrap_bravo_path()
+
 DAEMON_NAME = "cold_outreach_runner"
 DEFAULT_INTERVAL_SECONDS = 30
 # Recipients stuck at status='sending' with no sent_at for this many seconds
@@ -81,7 +86,6 @@ def _log(msg: str) -> None:
 
 def _load_env() -> dict[str, str]:
     try:
-        sys.path.insert(0, str(REPO_ROOT / "scripts"))
         from lib.secret_loader import load_env  # type: ignore
         return load_env()
     except Exception:
@@ -109,18 +113,14 @@ def _supabase():
 
 
 def _send_gateway_fn():
-    """Return send_gateway.send callable or None on import failure."""
-    sys.path.insert(0, str(REPO_ROOT / "scripts"))
-    sys.path.insert(0, str(REPO_ROOT / "scripts" / "integrations"))
+    """Return send_gateway.send callable or None on import failure.
+    send_gateway lives in CEO-Agent/scripts/integrations/ (on sys.path
+    via the BRAVO_ROOT bootstrap)."""
     try:
-        from integrations import send_gateway  # type: ignore
-        return send_gateway.send
+        from integrations.send_gateway import send  # type: ignore
+        return send
     except Exception:
-        try:
-            import send_gateway  # type: ignore
-            return send_gateway.send
-        except Exception:
-            return None
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────────
