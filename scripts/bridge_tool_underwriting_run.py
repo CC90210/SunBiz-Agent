@@ -56,12 +56,23 @@ def underwriting_run(
     if triggered_by not in {"manual", "rerun", "chat", "automatic"}:
         triggered_by = "manual"
 
-    # Supabase client — uses the same env vars the bridge daemon already
-    # has access to (load_env is the canonical CEO-Agent secret loader,
-    # symlinked across agent runtimes).
-    bravo_root = Path(
-        os.environ.get("BRAVO_AGENT_ROOT", str(Path.home() / "CEO-Agent"))
-    )
+    # Resolve CEO-Agent runtime root (for the shared secret_loader +
+    # universal infra). BRAVO_AGENT_ROOT env var wins; otherwise probe
+    # the two canonical locations CC uses (Mac/Linux ~/CEO-Agent vs
+    # Windows C:\Users\User\Business-Empire-Agent).
+    bravo_root_env = os.environ.get("BRAVO_AGENT_ROOT")
+    bravo_candidates: list[Path] = []
+    if bravo_root_env:
+        bravo_candidates.append(Path(bravo_root_env))
+    bravo_candidates.append(Path.home() / "CEO-Agent")
+    if os.name == "nt":
+        bravo_candidates.append(Path("C:/Users/User/Business-Empire-Agent"))
+    bravo_root = next((c for c in bravo_candidates if (c / "scripts").is_dir()), None)
+    if bravo_root is None:
+        return _err(
+            f"CEO-Agent runtime not found. Tried: {[str(c) for c in bravo_candidates]}. "
+            "Set BRAVO_AGENT_ROOT or clone CEO-Agent / Business-Empire-Agent next to SunBiz-Agent."
+        )
     try:
         from supabase import create_client  # type: ignore
     except ImportError:
