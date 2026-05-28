@@ -1,0 +1,41 @@
+name,aliases,industry_signal_keywords,category,tier,typical_term_days,typical_buy_rate_min,typical_buy_rate_max,paper_grades_accepted,contact_email,submission_notes
+OnDeck,On Deck Capital,"ONDECK,ON DECK",mca,1,270,1.20,1.35,A,,Tier 1 — A paper only. Clean books. 6+ months TIB.
+Forward Financing,Forward Fin,"FWD FIN,FORWARD FINANCING",mca,1,270,1.20,1.35,A,,Tier 1 — A paper. Strong revenue + low stack.
+Kapitus,Strategic Funding Source,"KAPITUS,SFS CAPITAL",mca,1,270,1.20,1.35,A,,Tier 1 — A paper. Avoid if any active collections.
+Credibly,,"CREDIBLY",mca,1,270,1.22,1.35,A,,Tier 1 — A paper.
+BlueVine,Blue Vine,"BLUEVINE,BLUE VINE",loc,1,365,1.18,1.32,A,,Tier 1 — LOC product. Strong card-processing businesses.
+Velocity,Velocity Capital,"VELOCITY CAP,VELOCITY CAPITAL",mca,2,180,1.30,1.42,"A,B",,Tier 2 — 1-2 positions OK.
+National Funding,,"NATIONAL FUNDING",mca,2,180,1.30,1.42,"A,B",,Tier 2 — manageable leverage.
+CFG Merchant Solutions,CFG,"CFG MERCHANT,CFG MS",mca,2,180,1.30,1.42,"A,B",,Tier 2.
+Fora Financial,Fora,"FORA FINANCIAL,FORA",mca,2,180,1.30,1.42,"A,B",,Tier 2.
+Mulligan Funding,Mulligan,"MULLIGAN FUNDING,MULLIGAN",mca,2,180,1.32,1.42,"A,B",,Tier 2.
+CAN Capital,CAN Cap,"CAN CAPITAL,CAN CAP",mca,2,180,1.30,1.42,"A,B",,Tier 2.
+Funding Circle,,"FUNDING CIRCLE",term_loan,2,365,1.18,1.35,"A,B",,Tier 2 term-loan product.
+Yellowstone Capital,Yellowstone,"YELLOWSTONE,YS CAP",mca,3,120,1.40,1.55,"B,C,D",,Tier 3 — sub-prime. SunBiz bread and butter.
+Mantis Funding,Mantis,"MANTIS FUNDING",mca,3,120,1.40,1.55,"B,C,D",,Tier 3.
+Rapid Capital Funding,RCF,"RAPID CAP,RCF FUNDING",mca,3,120,1.40,1.55,"B,C,D",,Tier 3.
+Reliant Funding,,"RELIANT FUNDING",mca,3,120,1.40,1.55,"B,C,D",,Tier 3.
+DLP Capital,DLP,"DLP CAPITAL,DLP CAP",mca,3,150,1.40,1.55,"B,C,D",,Tier 3 — consolidation territory.
+Olympus Funding,Olympus,"OLYMPUS FUNDING,OLYMPUS",mca,3,120,1.40,1.52,"B,C,D",,Tier 3.
+Cloudfund,Cloud Fund,"CLOUDFUND,CLOUD FUND",mca,3,120,1.42,1.55,"C,D",,Tier 3.
+Cherokee Funding,Cherokee,"CHEROKEE FUNDING,CHEROKEE",mca,3,150,1.40,1.50,"B,C,D",,Tier 3.
+Enod Capital,Enod,"ENOD CAPITAL,ENOD",mca,3,120,1.42,1.55,"C,D",,Tier 3.
+Loanme,Loan Me,"LOANME,LOAN ME",mca,3,150,1.40,1.52,"C,D",,Tier 3.
+Funding Metrics,FM Capital,"FUNDING METRICS,FM CAP",mca,3,120,1.42,1.55,"C,D",,Tier 3.
+Channel Partners Capital,Channel Partners,"CHANNEL PARTNERS,CHANNEL CAP",mca,3,180,1.40,1.50,"B,C",,Tier 3.
+Idea Financial,Idea,"IDEA FINANCIAL,IDEA FIN",mca,3,120,1.42,1.52,"C,D",,Tier 3.
+Mr. Advance,Mr Advance,"MR ADVANCE,MRADVANCE",mca,3,120,1.45,1.55,"C,D",,Tier 3.
+GMD Capital,GMD,"GMD CAPITAL,GMD CAP",mca,3,120,1.45,1.55,"C,D",,Tier 3.
+Trellis Funding,Trellis,"TRELLIS FUNDING,TRELLIS",mca,3,120,1.42,1.52,"C,D",,Tier 3.
+Lendr,Lendr Inc,"LENDR,LENDR INC",mca,3,150,1.40,1.50,"B,C,D",,Tier 3.
+Spartan Capital,Spartan,"SPARTAN CAPITAL,SPARTAN CAP",mca,3,120,1.42,1.55,"C,D",,Tier 3.
+Giggle Finance,Giggle,"GIGGLE FINANCE,GIGGLE",mca,4,90,1.45,1.65,D,,Tier 4 — micro/high-risk.
+Instafund,Insta Fund,"INSTAFUND,INSTA FUND",mca,4,90,1.50,1.65,D,,Tier 4.
+Mint Capital,Mint,"MINT CAPITAL,MINT CAP",mca,4,90,1.50,1.65,D,,Tier 4.
+Family Capital,Family,"FAMILY CAPITAL,FAMILY CAP",mca,4,90,1.50,1.65,D,,Tier 4.
+Greenbox Capital,Greenbox,"GREENBOX CAPITAL,GREENBOX",mca,4,90,1.45,1.60,"C,D",,Tier 4.
+Kabbage,,"KABBAGE",loc,2,365,1.18,1.32,"A,B",,LOC product.
+Square Capital,Square Loans,"SQUARE CAP,SQ CAPITAL",mca,1,365,1.18,1.32,A,,Card-processing only.
+Stripe Capital,,"STRIPE CAP,STRIPE CAPITAL",mca,1,365,1.18,1.32,A,,Stripe-processing only.
+PayPal Working Capital,PayPal WC,"PAYPAL WC,PAYPAL WORKING",mca,1,365,1.18,1.32,A,,PayPal-processing only.
+Fundbox,,"FUNDBOX",loc,3,120,1.40,1.55,"B,C,D",,LOC product, sub-prime.
