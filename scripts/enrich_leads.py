@@ -144,8 +144,8 @@ def cmd_audit(args) -> int:
             continue
         email = padded[email_idx].strip()
         confidence = padded[conf_idx].strip()
-        if email or confidence in {"HIGH", "MEDIUM", "LOW"}:
-            continue  # already enriched
+        if email or confidence in {"HIGH", "MEDIUM", "LOW", "CALL_ONLY"}:
+            continue  # already enriched OR confirmed call-only — no future enrichment will help
         phone = padded[phone_idx]
         area = ""
         m = re.search(r"\((\d{3})\)", phone)
@@ -226,7 +226,7 @@ def cmd_status(args) -> int:
     conf_idx = _col_to_idx(cols["confidence"])
     business_idx = _col_to_idx(cols["business"])
 
-    tally = {"HIGH": 0, "MEDIUM": 0, "LOW": 0, "NONE": 0, "empty": 0}
+    tally = {"HIGH": 0, "MEDIUM": 0, "LOW": 0, "CALL_ONLY": 0, "NONE": 0, "empty": 0}
     total_leads = 0
     for i, row in enumerate(rows):
         if i == 0:
@@ -247,13 +247,16 @@ def cmd_status(args) -> int:
     recovered = tally["HIGH"] + tally["MEDIUM"] + tally["LOW"]
     print(f"Sheet: {args.tab}")
     print(f"Total leads: {total_leads}")
-    print(f"  HIGH:   {tally['HIGH']:>4d}")
-    print(f"  MEDIUM: {tally['MEDIUM']:>4d}")
-    print(f"  LOW:    {tally['LOW']:>4d}")
-    print(f"  NONE:   {tally['NONE']:>4d}")
-    print(f"  empty:  {tally['empty']:>4d}")
+    print(f"  HIGH:      {tally['HIGH']:>4d}")
+    print(f"  MEDIUM:    {tally['MEDIUM']:>4d}")
+    print(f"  LOW:       {tally['LOW']:>4d}")
+    print(f"  CALL_ONLY: {tally['CALL_ONLY']:>4d}  (no web footprint — phone outreach only)")
+    print(f"  NONE:      {tally['NONE']:>4d}  (research attempted, no email surfaced)")
+    print(f"  empty:     {tally['empty']:>4d}  (not yet attempted)")
     if total_leads:
-        print(f"Recovery rate: {recovered}/{total_leads} ({100*recovered/total_leads:.1f}%)")
+        triaged = recovered + tally["CALL_ONLY"] + tally["NONE"]
+        print(f"Email recovery: {recovered}/{total_leads} ({100*recovered/total_leads:.1f}%)")
+        print(f"Triage coverage: {triaged}/{total_leads} ({100*triaged/total_leads:.1f}%)")
     return 0
 
 
