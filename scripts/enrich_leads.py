@@ -123,6 +123,9 @@ def cmd_audit(args) -> int:
     if not rows:
         print(f"No rows read from {args.tab}", file=sys.stderr)
         return 1
+    warning = _check_email_column(rows, cols["email"], args.tab)
+    if warning:
+        print(f"WARNING: {warning}", file=sys.stderr)
 
     email_idx = _col_to_idx(cols["email"])
     conf_idx = _col_to_idx(cols["confidence"])
@@ -215,6 +218,40 @@ def cmd_writeback(args) -> int:
     return 0 if errors == 0 else 2
 
 
+def _check_email_column(rows: list[list[str]], email_col: str, tab: str) -> str | None:
+    """Verify the configured Email column actually exists in the sheet.
+    Returns a warning message if the column is missing/empty in the
+    header row, or None if it looks fine. We don't fail-fast — the
+    operator might be running audit on a tab that genuinely has no
+    Email column yet and wants to add one. We just surface the risk
+    so they can pass --email-col to point at the right place.
+    """
+    if not rows:
+        return f"tab '{tab}' returned zero rows — wrong tab name?"
+    header = rows[0]
+    email_idx = _col_to_idx(email_col)
+    if email_idx >= len(header):
+        return (
+            f"tab '{tab}' has only {len(header)} columns; configured Email "
+            f"column {email_col} (index {email_idx}) is past the end. "
+            f"Pass --email-col to point at an existing column, or add "
+            f"Email/Confidence/Source headers to the sheet first."
+        )
+    label = (header[email_idx] or "").strip().lower()
+    if not label:
+        return (
+            f"tab '{tab}' column {email_col} has no header label. "
+            f"This may be intentional (the BA Approvals January tab uses "
+            f"an unlabeled column M for Email) but verify before proceeding."
+        )
+    if "email" not in label:
+        return (
+            f"tab '{tab}' column {email_col} header is {header[email_idx]!r}, "
+            f"not an Email column. Pass --email-col to point at the right column."
+        )
+    return None
+
+
 def cmd_status(args) -> int:
     """Print recovery breakdown for a tab."""
     cols = dict(DEFAULT_COLS)
@@ -222,11 +259,24 @@ def cmd_status(args) -> int:
     cols["confidence"] = args.conf_col
     rng = f"'{args.tab}'!A1:O{args.max_rows}"
     rows = _sheets_read(args.sheet_id, rng)
+    warning = _check_email_column(rows, cols["email"], args.tab)
+    if warning:
+        print(f"WARNING: {warning}", file=sys.stderr)
     email_idx = _col_to_idx(cols["email"])
     conf_idx = _col_to_idx(cols["confidence"])
     business_idx = _col_to_idx(cols["business"])
 
-    tally = {"HIGH": 0, "MEDIUM": 0, "LOW": 0, "CALL_ONLY": 0, "NONE": 0, "empty": 0}
+    # Triage states: HIGH/MEDIUM/LOW = email recovered. CALL_ONLY = no web
+    # footprint, phone outreach only. NONE = research tried, nothing found.
+    # `other` = any non-empty confidence value the operator added (e.g.
+    # IDENTITY_MISMATCH, DO_NOT_CONTACT) — these are valid triage verdicts
+    # the operator must read and act on. Only `empty` rows are
+    # genuinely untouched.
+    RECOVERED = {"HIGH", "MEDIUM", "LOW"}
+    KNOWN = RECOVERED | {"CALL_ONLY", "NONE"}
+    tally = {k: 0 for k in KNOWN}
+    other_tags: dict[str, int] = {}
+    empties = 0
     total_leads = 0
     for i, row in enumerate(rows):
         if i == 0:
@@ -239,12 +289,15 @@ def cmd_status(args) -> int:
         email = padded[email_idx].strip()
         if confidence in tally:
             tally[confidence] += 1
+        elif confidence:  # non-empty, non-standard tag (e.g. IDENTITY_MISMATCH)
+            other_tags[confidence] = other_tags.get(confidence, 0) + 1
         elif email:
             tally["HIGH"] += 1  # email without confidence — assume HIGH
         else:
-            tally["empty"] += 1
+            empties += 1
 
-    recovered = tally["HIGH"] + tally["MEDIUM"] + tally["LOW"]
+    recovered = sum(tally[k] for k in RECOVERED)
+    triaged = recovered + tally["CALL_ONLY"] + tally["NONE"] + sum(other_tags.values())
     print(f"Sheet: {args.tab}")
     print(f"Total leads: {total_leads}")
     print(f"  HIGH:      {tally['HIGH']:>4d}")
@@ -252,9 +305,10 @@ def cmd_status(args) -> int:
     print(f"  LOW:       {tally['LOW']:>4d}")
     print(f"  CALL_ONLY: {tally['CALL_ONLY']:>4d}  (no web footprint — phone outreach only)")
     print(f"  NONE:      {tally['NONE']:>4d}  (research attempted, no email surfaced)")
-    print(f"  empty:     {tally['empty']:>4d}  (not yet attempted)")
+    for tag, count in sorted(other_tags.items()):
+        print(f"  {tag:9s}: {count:>4d}  (operator triage state — needs review)")
+    print(f"  empty:     {empties:>4d}  (not yet attempted)")
     if total_leads:
-        triaged = recovered + tally["CALL_ONLY"] + tally["NONE"]
         print(f"Email recovery: {recovered}/{total_leads} ({100*recovered/total_leads:.1f}%)")
         print(f"Triage coverage: {triaged}/{total_leads} ({100*triaged/total_leads:.1f}%)")
     return 0
