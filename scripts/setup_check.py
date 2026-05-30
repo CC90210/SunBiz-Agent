@@ -262,6 +262,52 @@ def check_brand_identity(report: Report) -> None:
     report.add("brand_identity", "pass", "sunbiz brand wired in send_gateway")
 
 
+def check_per_user_credentials(c, report: Report) -> None:
+    """For each non-owner employee, list which personal credentials are
+    still missing. Owners can be skipped — they use shared submissions@
+    and tend to have everything wired earlier. The current personal
+    credential of record for SunBiz is Gmail OAuth (refresh token under
+    service='gmail_oauth')."""
+    members = (
+        c.table("user_profiles")
+        .select("id,email,team_role,is_owner,auth_user_id")
+        .eq("tenant_id", SUN_TENANT_ID)
+        .execute()
+        .data
+        or []
+    )
+    employees = [u for u in members if not u.get("is_owner") and u.get("auth_user_id")]
+    if not employees:
+        report.add("per_user_credentials", "pass",
+                   "no non-owner employees to audit")
+        return
+    missing_gmail = []
+    for u in employees:
+        rows = (
+            c.table("user_integration_credentials")
+            .select("id,field_key")
+            .eq("tenant_id", SUN_TENANT_ID)
+            .eq("user_id", u["auth_user_id"])
+            .eq("service", "gmail_oauth")
+            .execute()
+            .data
+            or []
+        )
+        has_refresh = any(r.get("field_key") == "refresh_token" for r in rows)
+        if not has_refresh:
+            missing_gmail.append(u["email"])
+    if not missing_gmail:
+        report.add("per_user_credentials", "pass",
+                   f"all {len(employees)} employee(s) have Gmail connected")
+        return
+    report.add(
+        "per_user_credentials", "warn",
+        f"{len(missing_gmail)} employee(s) without Gmail connected: " +
+        ", ".join(missing_gmail),
+        hint="each unconnected employee visits /settings and clicks 'Connect Gmail' under Integrations",
+    )
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="SunBiz Day-1 setup readiness check")
     p.add_argument("--json", action="store_true", help="machine-readable output")
@@ -278,6 +324,7 @@ def main() -> int:
     check_bridge(client, report)
     check_daemons(report)
     check_brand_identity(report)
+    check_per_user_credentials(client, report)
 
     if args.json:
         print(json.dumps({"checks": report.checks, "counts": report.counts()}, indent=2))
