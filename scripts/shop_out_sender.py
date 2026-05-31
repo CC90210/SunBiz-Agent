@@ -533,19 +533,12 @@ def _process_thread(client, send_fn, thread: dict, dry_run: bool) -> dict:
 
     # CC list — the dashboard merges (operator-typed cc) + (lender's
     # stored submission_cc_emails) + (assigned rep's email under
-    # shared-inbox model) into thread.cc_emails per row. Pass as a
-    # comma-joined string; send_gateway re-parses with _parse_email_list
-    # and filters duplicates / bad addresses server-side.
-    cc_emails_raw = thread.get("cc_emails") or []
-    cc_email_param: Optional[str] = None
-    if isinstance(cc_emails_raw, list) and cc_emails_raw:
-        clean = [
-            e.strip()
-            for e in cc_emails_raw
-            if isinstance(e, str) and "@" in e and e.strip()
-        ]
-        if clean:
-            cc_email_param = ",".join(clean)
+    # shared-inbox model) into thread.cc_emails per row. send_gateway's
+    # normalize_cc accepts the list directly and returns the comma-joined
+    # string send_gateway.send() wants — single source of truth across
+    # every caller.
+    from integrations.send_gateway import normalize_cc  # local import; same pattern as `send` import above
+    cc_email_param = normalize_cc(thread.get("cc_emails"))
 
     # Attachments — resolve from persisted thread.attachments first;
     # fall back to lead_documents auto-pick.
