@@ -1,112 +1,104 @@
 ---
-title: SunBiz turnkey — tomorrow's plan
+title: SunBiz turnkey — operator action list
 status: actionable
-last_updated: 2026-05-30
+last_updated: 2026-05-31
 audience: empire-operator
 ---
 
-# SunBiz turnkey — tomorrow's plan
+# SunBiz turnkey — what's left for Ezra
 
-State as of today (2026-05-30 commit window):
+State as of 2026-05-31 commit window:
 
-- Three users provisioned on the SunBiz tenant: **Submissions@ (owner)**, **alex@**, **jordan@**
-- All three have `agents_enabled: [solara, helios]`
-- Tier 1 setup ergonomics shipped today (Settings → SetupReadinessCard, `setup_check.py` per-user audit, lead_interactions audit trail)
-- Live setup_check.py says: **6 PASS · 2 WARN · 1 FAIL**
+- All three Tier 2 product questions (#5/#6/#7) shipped — see `docs/TOMORROW_ARCHIVE_2026-05-30.md` if you want to see the original deferred-decision shape.
+- Migrations 074-087 applied to live Supabase.
+- Dashboard auto-deployed to Vercel; sigma-eight serving the latest.
+- Three SunBiz users live (Submissions@ owner, alex member, jordan member).
 
-## What Ezra needs to do TOMORROW MORNING (60 minutes total)
+## Engineering: DONE
+
+| # | Item | Where it landed |
+|---|---|---|
+| Day-1 | Setup readiness card | `/settings` top-of-page panel |
+| Day-1 | Per-user Gmail OAuth | `/settings#integrations` → Connect Gmail |
+| Day-1 | `setup_check.py` CLI | `python scripts/setup_check.py` |
+| #5 | Role-based agent defaults | `lib/role-agent-defaults.ts` wired into `/api/auth/redeem-invite` |
+| #6 | Personal phone field | `lib/setup-readiness.ts` + `ProfileEditor.tsx` + migration 085 column |
+| #7 | Soft seat warning | `lib/seat-warning.ts` wired into `/team` page (starter plan = 3 seats) |
+
+## What's left for Ezra (~60 minutes total)
 
 These are operator actions — no engineering required:
 
 | # | Step | Where | ETA |
 |---|---|---|---|
 | 1 | Sign into `/t/sun/settings` as Submissions@ | dashboard | 1 min |
-| 2 | Read the **Setup readiness** card at the top — it lists exactly what's missing | dashboard | 2 min |
+| 2 | Read the Setup readiness card at the top | dashboard | 2 min |
 | 3 | Wire the 4 required tenant-shared keys (Anthropic, SMTP, Stripe, JotForm) under Integration keys | dashboard | 15 min |
 | 4 | Add 2-3 more lenders under `/lenders → + New lender` | dashboard | 10 min |
 | 5 | Mint a pair code under Settings → Devices, install bridge on the VPS (`python scripts/bridge_setup.py pair <code>`) | VPS | 15 min |
 | 6 | Forward a Gmail OAuth link to Alex + Jordan: `/settings#integrations`, click "Connect Gmail" | comms | 2 min |
 | 7 | Re-run `python scripts/setup_check.py` from SunBiz-Agent — should show **8 PASS · 0 WARN · 0 FAIL** when complete | terminal | 1 min |
 
-Then SunBiz is **live**: drips fire, daily plan generates, follow-ups
-queue, renewals scan, lender shop-out works, every email send carries
-the right "from" address.
+After step 7, SunBiz is **operationally live**: drips fire, daily plan generates, follow-ups queue, renewals scan, lender shop-out works, every email send carries the right "from" address.
 
-## What I (engineering) plan to ship next — pick before I start
+## What the Tier 2 ships actually do for Ezra
 
-These are the Tier 2 items from the readiness report. Each one has a
-**product question** I need answered before I write code. Pick the
-ones you want and answer the questions.
+### Role-based agent defaults (#5)
 
-### Item #5 — Role-based agents_enabled defaults
+Today: every SunBiz profile has `agents_enabled = [solara, helios]` because all three users were pre-provisioned manually.
 
-**Current state**: every SunBiz user has `[solara, helios]` regardless of role.
+Going forward: a new hire's profile comes through `/api/auth/redeem-invite`, which reads their team_role from the invite and stamps the right agent palette via `defaultAgentsForRole(slug, role, manifest)`:
 
-**Product question**: Should agents per role differ? My guess:
-
-| Role | Default agents | Rationale |
-|---|---|---|
-| `owner` | solara + helios | Full visibility |
-| `admin` | solara + helios | Same as owner minus billing actions |
-| `loan_officer` | solara + helios | Outreach + funding ops |
-| `processor` | solara only | Funding ops, not sales outreach |
-| `read_only` | solara (read-only mode) | Surface only |
-| `member` | solara only | Conservative default |
-
-**Decision needed**: agree with the table above, or specify your own
-per-role agent palette. Then I'll add it to `lib/manifest/seeds.ts`
-`SUN_SEED` and the invite-redemption flow.
-
-### Item #6 — Per-employee phone/SMS (your "personal text or number")
-
-**Current state**: Twilio is shared at the tenant level. Every SMS goes through one number.
-
-**Three design options** — pick one:
-
-| Option | Description | Pro | Con |
-|---|---|---|---|
-| A | **Personal cell as display only** — store each employee's personal cell in `user_profiles.personal_phone`, agents can read it ("Alex's cell is …") but outbound still uses tenant Twilio | Trivial to ship | Outbound still says "from the SunBiz line" |
-| B | **Twilio sub-account per employee** — each employee gets a Twilio number SunBiz pays for | True per-employee identity | $1/mo per number + Twilio plumbing |
-| C | **Operator's personal Twilio key per employee** (mirror of Gmail OAuth) — each employee adds their own Twilio account | Maximum personalization | Employees need their own Twilio billing |
-
-**Decision needed**: A / B / C. My recommendation: **A** for v1 (display only), **B** later (true per-user lines once volume justifies the spend).
-
-### Item #7 — Seat limit enforcement
-
-**Current state**: `tenants.plan_tier` exists but nothing prevents Ezra from inviting a 4th, 5th, 10th user.
-
-**Product question**: Do we want hard enforcement, soft warning, or none?
-
-| Option | Behavior |
+| Role | Default agents |
 |---|---|
-| Hard | API refuses invite when seat count reached. Operator sees a "upgrade your plan" CTA. |
-| Soft | API allows invite; dashboard banner says "you are at N/M seats — billing will adjust next cycle." |
-| None | Honor system; Stripe metered billing handles the rest. |
+| owner | solara + helios |
+| admin | solara + helios |
+| loan_officer | solara + helios |
+| processor | solara only |
+| read_only | solara only |
+| member | solara only |
 
-**Decision needed**: which option. If Hard/Soft, also specify the seat
-cap per plan_tier (`free` / `starter` / `growth` / `pro`?).
+The defaults only land on rows where `agents_enabled IS NULL` so an explicit user choice is never overwritten.
 
-## Tier 3 — Security hardening (defer until usage is real)
+### Personal phone (#6 — Option A)
 
-These don't block SunBiz going live but should land in a dedicated
-hardening sprint:
+Each user can set their personal cell or DID in `/settings → Profile → Personal phone`. Stored on `user_profiles.personal_phone` (migration 085). **Display-only** — outbound SMS still goes through the tenant's shared Twilio number. Agents quote the field when a lead asks "what's the direct number to reach Alex" without exposing the shared line.
 
-| Item | Severity | Owner |
-|---|---|---|
-| `redeem_tenant_invite` `expires_at` on retry path | MEDIUM | engineering |
-| `webhook_post` DNS-rebinding (bridge-side) | LOW | engineering |
-| `/api/bridge` rate limiting | HIGH | engineering |
+Phase B (true per-employee Twilio sub-accounts) is deferred until volume justifies the per-line spend.
+
+### Soft seat warning (#7 — Option B)
+
+Plan limits (default sizing):
+
+| Plan tier | Seat limit |
+|---|---|
+| free | 1 |
+| starter | 3 |
+| growth | 10 |
+| pro | 25 |
+| enterprise | no cap |
+
+SunBiz is currently on `starter` (3 seats) and has 3 users — so the `/team` page now shows an "approaching" banner: "3 of 3 seats used. One more invite puts you over your plan — billing will adjust next cycle."
+
+Inviting a 4th user is not blocked — Stripe metered billing reconciles the overage on the next cycle. To remove the banner, upgrade the plan_tier to `growth` (or set to `enterprise` to remove the cap entirely).
+
+## Tier 3 — Security hardening (shipped)
+
+These don't change Ezra's daily flow but make the deploy production-safe:
+
+| Item | Where it landed |
+|---|---|
+| RLS lockdown on 13 wide-open tables (incl `agent_events`) | Migrations 081 + 082 |
+| `redeem_tenant_invite` retry path checks `expires_at` | Migration 083 |
+| DNS-rebinding defense on `webhook_post` (bridge-side) | `bravo_cli/cron_runner.py` |
+| `/api/bridge/*` + `/api/cron-jobs/poll` rate limiting | IP-keyed token bucket BEFORE the bearer check |
+| `OPERATOR_EMAIL` fallback gated | env opt-in only |
+| Dependabot vulnerabilities | 0 remaining (was 3) |
 
 ## How to use this document
 
-When you read this tomorrow:
-
 1. Run `python scripts/setup_check.py` from SunBiz-Agent — see live state
 2. Run through Ezra's 7-step list above — get to **0 FAIL · 0 WARN**
-3. Answer the 3 product questions on items #5/#6/#7 — paste decisions
-   inline in this doc or just reply in chat
-4. I'll ship the Tier 2 items based on your decisions
+3. Once #5 banner shows on /team, you'll know SunBiz is at seat limit; decide plan upgrade timing
 
-The Tier 1 work (Setup readiness card, audit trail column, extended
-setup_check) is already live in dashboard + scripts — no work needed
-from you, just verify it on /settings.
+The engineering side is complete. The only path to "fully live" is the 7 operator steps.
