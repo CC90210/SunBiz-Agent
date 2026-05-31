@@ -235,6 +235,44 @@ def _filter_matches(trigger_filter: dict, payload: dict) -> bool:
     return True
 
 
+# Cached auth_user_id -> email lookup. assigned_to on a lead is an
+# auth_user_id (set by /api/leads/[id]/assign). Daemon process is
+# singleton + long-lived, so an unbounded module-level cache is safe;
+# user emails change rarely enough that staleness isn't a concern
+# inside one daemon run.
+_ASSIGNED_REP_EMAIL_CACHE: dict[str, str] = {}
+
+
+def _resolve_assigned_rep_email(sb, assigned_to: Optional[str]) -> Optional[str]:
+    """Look up the assigned rep's email from user_profiles. Fail-open:
+    returns None on any error or missing data — drips still send, just
+    without the CC. Called per send_step so the rep stays on the drip
+    thread under SunBiz's shared-inbox From: model."""
+    if not isinstance(assigned_to, str) or not assigned_to.strip():
+        return None
+    auth_user_id = assigned_to.strip()
+    cached = _ASSIGNED_REP_EMAIL_CACHE.get(auth_user_id)
+    if cached is not None:
+        return cached or None  # empty string = "looked up, no email"
+    try:
+        r = (
+            sb.table("user_profiles")
+            .select("email")
+            .eq("auth_user_id", auth_user_id)
+            .limit(1)
+            .execute()
+        )
+        rows = r.data or []
+        email = (rows[0] or {}).get("email") if rows else ""
+        if isinstance(email, str) and "@" in email:
+            _ASSIGNED_REP_EMAIL_CACHE[auth_user_id] = email
+            return email
+    except Exception as e:
+        _log(f"assigned_rep email lookup failed user={auth_user_id[:8]}: {e}")
+    _ASSIGNED_REP_EMAIL_CACHE[auth_user_id] = ""
+    return None
+
+
 def _has_active_state(sb, sequence_id: str, lead_id: str) -> bool:
     """one_per_lead guard. Returns True if an active row already exists
     for this (sequence, lead) pair."""
@@ -571,11 +609,19 @@ def _send_step(sb, state_row: dict, sequence: dict) -> dict:
     if channel == "sms" and not to_phone:
         return {"outcome": "permanent", "detail": "lead has no phone on file"}
 
+    # SunBiz directive 2026-05-31: under the shared-inbox From: model,
+    # the assigned rep stays on the drip thread by being CC'd on each
+    # send. lead.assigned_to holds an auth_user_id; join through
+    # user_profiles to get the email. Failure to resolve is non-fatal —
+    # we send without CC rather than blocking the drip.
+    cc_email = _resolve_assigned_rep_email(sb, lead.get("assigned_to"))
+
     try:
         if channel == "email":
             res = send(
                 channel="email",
                 to_email=to_email,
+                cc_email=cc_email,
                 subject=subject or "(no subject)",
                 body_text=body,
                 lead_id=state_row["lead_id"],
