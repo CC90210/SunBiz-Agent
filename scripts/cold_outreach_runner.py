@@ -252,26 +252,24 @@ def _resolve_lead(sb, cold_lead_id: Optional[str], tenant_id: str) -> dict[str, 
 # ─────────────────────────────────────────────────────────────────────
 
 
-def _increment_campaign_counter(sb, campaign_id: str, field: str) -> None:
-    """Increment sent_count or failed_count by 1 via read-modify-write.
-    Supabase Python client doesn't expose atomic increment natively; this is
-    safe because a single daemon runs at a time per campaign."""
+def _flush_campaign_counters(
+    sb,
+    campaign_id: str,
+    sent_total: int,
+    failed_total: int,
+) -> None:
+    """Write the absolute sent_count and failed_count to the campaign row.
+    Replaces the prior per-recipient read-modify-write (2 round-trips ×
+    daily_cap, so up to 100 wasted DB calls per tick). Single daemon per
+    campaign means no concurrent writers contend on this row, so absolute
+    overwrite is safe. Recipient rows are the source of truth — on crash
+    the counters trail by one tick but reconcile on the next pass."""
     try:
-        row = (
-            sb.table("cold_outreach_campaigns")
-            .select(field)
-            .eq("id", campaign_id)
-            .limit(1)
-            .execute()
-        )
-        if not row.data:
-            return
-        current = row.data[0].get(field) or 0
         sb.table("cold_outreach_campaigns").update(
-            {field: current + 1}
+            {"sent_count": sent_total, "failed_count": failed_total}
         ).eq("id", campaign_id).execute()
     except Exception as e:
-        _log(f"counter increment failed campaign={campaign_id} field={field}: {e}")
+        _log(f"counter flush failed campaign={campaign_id}: {e}")
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -347,7 +345,6 @@ def _process_campaign(sb, campaign: dict[str, Any], send_fn) -> None:
                 ).eq("id", rec_id).execute()
             except Exception:
                 pass
-            _increment_campaign_counter(sb, campaign_id, "failed_count")
             failed_count += 1
             continue
 
@@ -392,7 +389,6 @@ def _process_campaign(sb, campaign: dict[str, Any], send_fn) -> None:
                 ).eq("id", rec_id).execute()
             except Exception as e:
                 _log(f"recipient sent-update failed rec={rec_id}: {e}")
-            _increment_campaign_counter(sb, campaign_id, "sent_count")
             sent_count += 1
             _log(f"sent rec={rec_id} address={merged_address[:30]}...")
         else:
@@ -403,9 +399,11 @@ def _process_campaign(sb, campaign: dict[str, Any], send_fn) -> None:
                 ).eq("id", rec_id).execute()
             except Exception as e:
                 _log(f"recipient failed-update failed rec={rec_id}: {e}")
-            _increment_campaign_counter(sb, campaign_id, "failed_count")
             failed_count += 1
             _log(f"failed rec={rec_id} reason={reason}")
+
+    # Flush counters once after the loop instead of N times during it.
+    _flush_campaign_counters(sb, campaign_id, sent_count, failed_count)
 
     # Check if campaign is fully complete
     if total_recipients > 0 and (sent_count + failed_count) >= total_recipients:
