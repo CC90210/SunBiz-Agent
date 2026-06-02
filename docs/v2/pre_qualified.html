@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<!--
+  ============================================================================
+  SUNBIZ FUNDING — SEQUENCE LIBRARY v2
+  TEMPLATE: Pre-Qualified  -- personalized "you're approved up to $X" offer
+  USE: Leads you've screened or enriched. The single highest-converting frame:
+       a specific dollar amount tied to the business + a single CTA.
+  SUBJECT OPTIONS:
+    A) {{business_name}} is pre-qualified
+    B) {{first_name}}, you're approved to apply for up to {{prequal_amount}}
+  PREVIEW TEXT: No hard credit pull - just confirm a few details to release it.
+  SWAP BEFORE SENDING:
+    - apply URL
+    - {{prequal_amount}} -> the real pre-qual figure for this lead
+    - expiry framing is optional honest urgency, not a fake countdown
+  ============================================================================
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <title>You're Pre-Qualified — SunBiz Funding</title>
+  <!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+  <style type="text/css">
+    body,table,td,a { -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
+    table,td { mso-table-lspace:0pt; mso-table-rspace:0pt; }
+    body { margin:0!important; padding:0!important; background:#eef1f6;
+           font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; }
+    .container { max-width:600px; margin:0 auto; background:#ffffff; }
+    .header { background:linear-gradient(135deg,#001F54 0%,#0a2d6e 60%,#001F54 100%);
+              border-bottom:3px solid #D4A843; padding:24px 40px; text-align:center; }
+    .logo { font-size:24px; font-weight:800; color:#fff; letter-spacing:3px; margin:0; }
+    .logo span { color:#D4A843; }
+    .badge { display:inline-block; margin:14px 0 0; background:#10b981; color:#fff; font-size:12px; font-weight:700; letter-spacing:1px; text-transform:uppercase; padding:6px 16px; border-radius:20px; }
+    .hero { background:#001F54; padding:30px 40px 34px; text-align:center; }
+    .hero .pre { font-size:14px; color:rgba(255,255,255,.8); margin:0 0 6px; }
+    .hero .amt { font-size:46px; font-weight:800; color:#D4A843; margin:0; line-height:1; }
+    .hero .for { font-size:13px; color:rgba(255,255,255,.7); margin:10px 0 0; }
+    .body { padding:30px 40px 14px; color:#1f2933; font-size:16px; line-height:1.6; }
+    .body p { margin:0 0 16px; }
+    .checks { margin:0 0 22px; padding:16px 20px; background:#f0fdf4; border-left:4px solid #10b981; border-radius:0 8px 8px 0; }
+    .checks p { font-size:14px; color:#1e293b; margin:0 0 7px; }
+    .checks p:last-child { margin:0; }
+    .checks .ck { color:#10b981; font-weight:700; margin-right:6px; }
+    .cta-wrap { text-align:center; margin:6px 0 24px; }
+    .cta { display:inline-block; background:#FF6B35; color:#fff!important; text-decoration:none; font-size:17px; font-weight:700; padding:16px 50px; border-radius:8px; letter-spacing:.5px; }
+    .cta-sub { font-size:12px; color:#94a3b8; margin:10px 0 0; }
+    .disc { font-size:11px; color:#94a3b8; line-height:1.6; margin:18px 0 8px; padding:12px 16px; background:#f8fafc; border-radius:6px; }
+    .footer { background:#0f172a; padding:24px 40px; text-align:center; }
+    .footer .fb { font-size:15px; font-weight:700; color:#fff; letter-spacing:2px; margin:0 0 8px; }
+    .footer .fb span { color:#D4A843; }
+    .footer .fa { font-size:12px; color:#64748b; margin:0 0 12px; line-height:1.6; }
+    .footer a { font-size:12px; color:#94a3b8; }
+    @media screen and (max-width:600px){
+      .body{ padding:24px 22px 12px!important; }
+      .header,.hero{ padding-left:22px!important; padding-right:22px!important; }
+      .hero .amt{ font-size:38px!important; }
+      .cta{ padding:15px 38px!important; }
+    }
+  </style>
+</head>
+<body>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f6;">
+    <tr><td>
+      <table role="presentation" class="container" cellpadding="0" cellspacing="0" align="center" width="600">
+
+        <tr><td class="header">
+          <p class="logo">SUN<span>BIZ</span> FUNDING</p>
+          <span class="badge">&#10003; Pre-Qualified</span>
+        </td></tr>
+
+        <tr><td class="hero">
+          <p class="pre">Based on {{business_name}}&rsquo;s profile, you&rsquo;re pre-qualified for up to</p>
+          <p class="amt">{{prequal_amount}}</p>
+          <p class="for">in working capital &mdash; pending a quick confirmation</p>
+        </td></tr>
+
+        <tr><td class="body">
+          <p>Hi {{first_name}},</p>
+          <p>Good news &mdash; {{business_name}} pre-qualifies for working capital based on the business profile we reviewed. To release your offer, we just need to confirm a few details. It takes about two minutes.</p>
+
+          <div class="checks">
+            <p><span class="ck">&#10003;</span> No hard credit pull to confirm</p>
+            <p><span class="ck">&#10003;</span> Same-day decision once confirmed</p>
+            <p><span class="ck">&#10003;</span> Funds available in as little as 24 hours</p>
+            <p><span class="ck">&#10003;</span> Payments that flex with your revenue</p>
+          </div>
+
+          <div class="cta-wrap">
+            <a href="https://form.jotform.com/253155026259254" target="_blank" rel="noopener" class="cta">Confirm &amp; Release Offer &rarr;</a>
+            <p class="cta-sub">~2 minutes &bull; No hard credit pull</p>
+          </div>
+
+          <p style="font-size:14px;color:#475569;">Prefer email? Reply with your last <strong>3 months of bank statements</strong> and {{rep_name}} will finalize your exact number the same day.</p>
+
+          <div class="disc">Pre-qualification is not a commitment to lend and does not guarantee approval. Final terms and amount are subject to underwriting review of your business revenue and account history. Business funding products only.</div>
+        </td></tr>
+
+        <tr><td class="footer">
+          <p class="fb">SUN<span>BIZ</span> FUNDING</p>
+          <p class="fa">1234 Business Ave, Suite 100 &bull; Miami, FL 33101<br />&copy; {{year}} SunBiz Funding. All rights reserved.</p>
+          <p style="margin:0;"><a href="https://form.jotform.com/253155026259254" target="_blank" rel="noopener">Release My Offer</a> &nbsp;&bull;&nbsp; <a href="{{unsubscribe_url}}">Unsubscribe</a></p>
+          <p style="font-size:11px;color:#475569;margin:12px 0 0;line-height:1.6;">You received this commercial email because your business information is publicly listed or you previously expressed interest in funding. Unsubscribe requests honored within 10 business days per CAN-SPAM.</p>
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>

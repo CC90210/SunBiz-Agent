@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SunBiz Funding — Email Library v2 (Sequence Edition)</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#0f172a; color:#e2e8f0; min-height:100vh; }
+    .header { background:linear-gradient(135deg,#001F54 0%,#0a2d6e 50%,#001F54 100%); border-bottom:4px solid #D4A843; padding:42px 20px 36px; text-align:center; }
+    .header h1 { font-size:32px; font-weight:800; color:#fff; letter-spacing:3px; margin-bottom:8px; }
+    .header h1 span { color:#D4A843; }
+    .header p { font-size:14px; color:rgba(255,255,255,.75); letter-spacing:1px; }
+    .header .v2tag { display:inline-block; margin-top:14px; background:#FF6B35; color:#fff; font-size:11px; font-weight:700; letter-spacing:1px; text-transform:uppercase; padding:6px 16px; border-radius:20px; }
+    .nav { background:#1e293b; border-bottom:1px solid #334155; padding:12px 20px; text-align:center; }
+    .nav a { color:#94a3b8; text-decoration:none; font-size:13px; font-weight:600; padding:8px 18px; border-radius:6px; margin:0 4px; }
+    .nav a.active { color:#D4A843; background:rgba(212,168,67,.15); border:1px solid #D4A843; }
+    .container { max-width:1280px; margin:0 auto; padding:36px 20px 60px; }
+
+    /* How-to-use panel */
+    .guide { background:#15213a; border:1px solid #334155; border-radius:14px; padding:26px 28px; margin-bottom:40px; }
+    .guide h2 { font-size:15px; color:#D4A843; letter-spacing:1px; text-transform:uppercase; margin-bottom:14px; }
+    .guide p { font-size:14px; color:#cbd5e1; line-height:1.7; margin-bottom:14px; }
+    .guide p strong { color:#fff; }
+    .cad { width:100%; border-collapse:collapse; margin:8px 0 18px; font-size:13px; }
+    .cad th { text-align:left; color:#D4A843; font-weight:700; padding:8px 10px; border-bottom:1px solid #334155; font-size:11px; text-transform:uppercase; letter-spacing:.5px; }
+    .cad td { padding:9px 10px; border-bottom:1px solid #233048; color:#cbd5e1; }
+    .cad td b { color:#fff; }
+    .tokens { display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; }
+    .tok { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; background:#0f172a; border:1px solid #334155; color:#7dd3fc; padding:4px 9px; border-radius:5px; }
+    .swap { background:#2a1a0f; border-left:3px solid #FF6B35; border-radius:0 8px 8px 0; padding:14px 18px; margin-top:6px; }
+    .swap p { margin:0; font-size:13px; color:#fbcfb5; line-height:1.6; }
+    .swap b { color:#fff; }
+
+    .section-title { font-size:13px; font-weight:700; color:#D4A843; letter-spacing:2px; text-transform:uppercase; margin-bottom:6px; padding-bottom:8px; border-bottom:1px solid #334155; }
+    .section-sub { font-size:13px; color:#7c8aa0; margin:0 0 18px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(330px,1fr)); gap:18px; margin-bottom:42px; }
+    .card { background:#1e293b; border-radius:12px; border:1px solid #334155; overflow:hidden; transition:transform .2s,border-color .2s; }
+    .card:hover { transform:translateY(-4px); border-color:#D4A843; }
+    .card-body { padding:20px; }
+    .badge { display:inline-block; font-size:10px; font-weight:700; letter-spacing:1px; text-transform:uppercase; padding:4px 10px; border-radius:4px; margin-bottom:10px; }
+    .b-cold { background:#3b82f6; color:#fff; }
+    .b-flag { background:#D4A843; color:#001F54; }
+    .b-grid { background:#10b981; color:#fff; }
+    .b-consol { background:#FF6B35; color:#fff; }
+    .b-prequal { background:#8b5cf6; color:#fff; }
+    .b-reengage { background:#06b6d4; color:#fff; }
+    .b-abandon { background:#f59e0b; color:#001F54; }
+    .b-referral { background:#22c55e; color:#fff; }
+    .card h3 { font-size:17px; font-weight:700; color:#fff; margin-bottom:6px; }
+    .card .purpose { font-size:13px; color:#94a3b8; line-height:1.55; margin-bottom:14px; }
+    .meta { font-size:12px; color:#cbd5e1; line-height:1.6; border-top:1px solid #334155; padding-top:12px; margin-bottom:14px; }
+    .meta .row { margin-bottom:7px; }
+    .meta .lbl { color:#64748b; text-transform:uppercase; font-size:10px; letter-spacing:.5px; font-weight:700; display:block; margin-bottom:2px; }
+    .meta .subj { color:#e2e8f0; }
+    .meta .subj em { color:#7dd3fc; font-style:normal; }
+    .meta .pv { color:#a5b4c4; font-style:italic; }
+    .meta .when { color:#D4A843; font-weight:600; }
+    .btns a, .btns button { display:inline-block; font-size:12px; font-weight:600; padding:8px 16px; border-radius:6px; text-decoration:none; margin:0 6px 0 0; cursor:pointer; border:none; }
+    .btn-prev { background:#FF6B35; color:#fff; }
+    .btn-tab { background:transparent; color:#94a3b8; border:1px solid #475569 !important; }
+    .btn-dl { background:transparent; color:#10b981; border:1px solid #10b981 !important; }
+    .footer { text-align:center; padding:40px 20px; color:#475569; font-size:12px; line-height:1.7; }
+    .footer span { color:#D4A843; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>SUN<span>BIZ</span> FUNDING</h1>
+  <p>EMAIL LIBRARY v2 &mdash; THE SEQUENCE EDITION</p>
+  <span class="v2tag">12 New Templates &bull; Built for Conversion</span>
+</div>
+
+<div class="nav">
+  <a href="../index.html">&larr; Original Library (16)</a>
+  <a href="index.html" class="active">New v2 Templates (12)</a>
+  <a href="../ads.html">Ad Creatives</a>
+</div>
+
+<div class="container">
+
+  <!-- HOW TO USE -->
+  <div class="guide">
+    <h2>How to use this library</h2>
+    <p>This batch is built as a <strong>working outbound campaign</strong>, not just standalone flyers. The five <strong>Cold Sequence</strong> emails (T1&ndash;T5) are deliberately plain-text &mdash; research shows text-style cold emails get roughly <strong>2&ndash;3&times; the replies</strong> of heavy graphics and land in the inbox, not spam. The branded HTML templates below are for warmer, opted-in, or replied-to leads. Send the cold sequence on this cadence:</p>
+    <table class="cad">
+      <tr><th>Touch</th><th>Day</th><th>Template</th><th>Job</th></tr>
+      <tr><td><b>T1</b></td><td>Day 0</td><td>Cold Intro</td><td>Personal hello + the core differentiator (fast, no hard pull)</td></tr>
+      <tr><td><b>T2</b></td><td>Day 3</td><td>Value Add</td><td>One concrete proof point: the speed timeline</td></tr>
+      <tr><td><b>T3</b></td><td>Day 7&ndash;10</td><td>Social Proof</td><td>One specific funded story, matched to their industry</td></tr>
+      <tr><td><b>T4</b></td><td>Day 14</td><td>Bump</td><td>Ultra-short nudge &mdash; reply onto the T1 thread</td></tr>
+      <tr><td><b>T5</b></td><td>Day 21&ndash;24</td><td>Breakup</td><td>Respectful close-the-loop &mdash; pulls a final wave of replies</td></tr>
+    </table>
+    <p><strong>Personalization tokens</strong> (find-and-replace, or auto-fill from the Command Center):</p>
+    <div class="tokens">
+      <span class="tok">{{first_name}}</span>
+      <span class="tok">{{business_name}}</span>
+      <span class="tok">{{industry}}</span>
+      <span class="tok">{{city}}</span>
+      <span class="tok">{{rep_name}}</span>
+      <span class="tok">{{rep_title}}</span>
+      <span class="tok">{{rep_phone}}</span>
+      <span class="tok">{{rep_email}}</span>
+      <span class="tok">{{prequal_amount}}</span>
+      <span class="tok">{{referral_reward}}</span>
+      <span class="tok">{{year}}</span>
+      <span class="tok">{{unsubscribe_url}}</span>
+    </div>
+    <div class="swap">
+      <p><b>Before you send:</b> every &ldquo;Apply&rdquo; link currently points to the existing JotForm (<b>form.jotform.com/253155026259254</b>) so previews work. When the Command Center form is live, it&rsquo;s a single find-and-replace per file to swap it. Factor rates, terms, and qualification numbers on the Tier Offer are illustrative &mdash; confirm them with underwriting before sending.</p>
+    </div>
+  </div>
+
+  <!-- COLD SEQUENCE -->
+  <p class="section-title">1 &bull; Cold Outbound Sequence</p>
+  <p class="section-sub">Plain-text, personal, high-deliverability. Run these in order as a 5-touch campaign.</p>
+  <div class="grid">
+
+    <div class="card"><div class="card-body">
+      <span class="badge b-cold">Touch 1 &bull; Day 0</span>
+      <h3>Cold Intro</h3>
+      <p class="purpose">First contact. ~95 words, looks like a real person wrote it. Single low-friction CTA.</p>
+      <div class="meta">
+        <div class="row"><span class="lbl">Subject</span><span class="subj"><em>Quick question, {{first_name}}</em></span></div>
+        <div class="row"><span class="lbl">Preview</span><span class="pv">No hard credit pull, ~2 min to check.</span></div>
+        <div class="row"><span class="lbl">Format</span><span class="when">Plain text &bull; ~95 words</span></div>
+      </div>
+      <div class="btns">
+        <a href="t1_cold_intro.html" class="btn-prev">Preview</a>
+        <a href="t1_cold_intro.html" target="_blank" class="btn-tab">New Tab</a>
+        <button onclick="dl('t1_cold_intro.html')" class="btn-dl">&#8595; Download</button>
+      </div>
+    </div></div>
+
+    <div class="card"><div class="card-body">
+      <span class="badge b-cold">Touch 2 &bull; Day 3</span>
+      <h3>Value Add</h3>
+      <p class="purpose">Shorter follow-up adding one proof point: the apply &rarr; decision &rarr; funded timeline.</p>
+      <div class="meta">
+        <div class="row"><span class="lbl">Subject</span><span class="subj"><em>One more thing, {{first_name}}</em></span></div>
+        <div class="row"><span class="lbl">Preview</span><span class="pv">Approved this morning, funded by afternoon.</span></div>
+        <div class="row"><span class="lbl">Format</span><span class="when">Plain text &bull; ~75 words</span></div>
+      </div>
+      <div class="btns">
+        <a href="t2_value_add.html" class="btn-prev">Preview</a>
+        <a href="t2_value_add.html" target="_blank" class="btn-tab">New Tab</a>
+        <button onclick="dl('t2_value_add.html')" class="btn-dl">&#8595; Download</button>
+      </div>
+    </div></div>
+
+    <div class="card"><div class="card-body">
+      <span class="badge b-cold">Touch 3 &bull; Day 7&ndash;10</span>
+      <h3>Social Proof</h3>
+      <p class="purpose">One specific, industry-matched funded story ($85K in under a week). Specificity beats &ldquo;trusted by thousands.&rdquo;</p>
+      <div class="meta">
+        <div class="row"><span class="lbl">Subject</span><span class="subj"><em>How a {{industry}} like yours used $85K</em></span></div>
+        <div class="row"><span class="lbl">Preview</span><span class="pv">She had the cash before the weekend.</span></div>
+        <div class="row"><span class="lbl">Format</span><span class="when">Plain text + quote &bull; ~130 words</span></div>
+      </div>
+      <div class="btns">
+        <a href="t3_social_proof.html" class="btn-prev">Preview</a>
+        <a href="t3_social_proof.html" target="_blank" class="btn-tab">New Tab</a>
+        <button onclick="dl('t3_social_proof.html')" class="btn-dl">&#8595; Download</button>
+      </div>
+    </div></div>
+
+    <div class="card"><div class="card-body">
+      <span class="badge b-cold">Touch 4 &bull; Day 14</span>
+      <h3>Bump / Nudge</h3>
+      <p class="purpose">The highest-leverage touch. ~40 words, sent as a reply on the T1 thread. Most replies come here.</p>
+      <div class="meta">
+        <div class="row"><span class="lbl">Subject</span><span class="subj"><em>Re: working capital for {{business_name}}</em></span></div>
+        <div class="row"><span class="lbl">Preview</span><span class="pv">Just resurfacing this in case it slipped past.</span></div>
+        <div class="row"><span class="lbl">Format</span><span class="when">Plain text &bull; ~40 words</span></div>
+      </div>
+      <div class="btns">
+        <a href="t4_bump.html" class="btn-prev">Preview</a>
+        <a href="t4_bump.html" target="_blank" class="btn-tab">New Tab</a>
+        <button onclick="dl('t4_bump.html')" class="btn-dl">&#8595; Download</button>
+      </div>
+    </div></div>
+
+    <div class="card"><div class="card-body">
+      <span class="badge b-cold">Touch 5 &bull; Day 21&ndash;24</span>
+      <h3>Breakup</h3>
+      <p class="purpose">Respectful close-the-loop. Loss-aversion framing pulls a final 10&ndash;33% reply wave. No &ldquo;last chance&rdquo; desperation.</p>
+      <div class="meta">
+        <div class="row"><span class="lbl">Subject</span><span class="subj"><em>Closing your file, {{first_name}}</em></span></div>
+        <div class="row"><span class="lbl">Preview</span><span class="pv">I&rsquo;ll stop reaching out &mdash; door stays open.</span></div>
+        <div class="row"><span class="lbl">Format</span><span class="when">Plain text &bull; ~55 words</span></div>
+      </div>
+      <div class="btns">
+        <a href="t5_breakup.html" class="btn-prev">Preview</a>
+        <a href="t5_breakup.html" target="_blank" class="btn-tab">New Tab</a>
+        <button onclick="dl('t5_breakup.html')" class="btn-dl">&#8595; Download</button>
+      </div>
+    </div></div>
+
+  </div>
+
+  <!-- FLAGSHIP OFFERS -->
+  <p class="section-title">2 &bull; Flagship Offers</p>
+  <p class="section-sub">Branded HTML for warm / opted-in / replied leads. These carry the offer and the application.</p>
+  <div class="grid">
+
+    <div class="card"><div class="card-body">
+      <span class="badge b-flag">Flagship</span>
+      <h3>Tier Offer</h3>
+      <p class="purpose">The proven MCA structure: personal intro &rarr; &ldquo;send 3 months of bank statements&rdquo; reply mechanic &rarr; 3-tier factor-rate qualification table (1.20&ndash;1.30, terms, payments, credit tiers) &rarr; personal funding-manager sign-off.</p>
+      <div class="meta">
+        <div class="row"><span class="lbl">Subject</span><span class="subj"><em>Funding terms for {{business_name}}</em></span></div>
+        <div class="row"><span class="lbl">Preview</span><span class="pv">Send 3 months of statements, I&rsquo;ll send a real number.</span></div>
+        <div class="row"><span class="lbl">Best for</span><span class="when">Primary offer &bull; warm or 2nd-touch</span></div>
+      </div>
+      <div class="btns">
+        <a href="tier_offer.html" class="btn-prev">Preview</a>
+        <a href="tier_offer.html" target="_blank" class="btn-tab">New Tab</a>
+        <button onclick="dl('tier_offer.html')" class="btn-dl">&#8595; Download</button>
+      </div>
+    </div></div>
+
+    <div class="card"><div class="card-body">
+      <span class="badge b-grid">Self-Select</span>
+      <h3>Funding Grid Pro</h3>
+      <p class="purpose">Refreshed &ldquo;pick your amount&rdquo; broadcast ($5K&ndash;$100K with weekly payments), qualification checklist, value props. Rebranded into the v2 navy/gold look.</p>
+      <div class="meta">
+        <div class="row"><span class="lbl">Subject</span><span class="subj"><em>{{first_name}}, pick your funding amount</em></span></div>
+        <div class="row"><span class="lbl">Preview</span><span class="pv">Same-day decision, funds in as little as 24h.</span></div>
+        <div class="row"><span class="lbl">Best for</span><span class="when">Opted-in list broadcast</span></div>
+      </div>
+      <div class="btns">
+        <a href="funding_grid_pro.html" class="btn-prev">Preview</a>
+        <a href="funding_grid_pro.html" target="_blank" class="btn-tab">New Tab</a>
+        <button onclick="dl('funding_grid_pro.html')" class="btn-dl">&#8595; Download</button>
+      </div>
+    </div></div>
+
+  </div>
+
+  <!-- SPECIALIZED PLAYS -->
+  <p class="section-title">3 &bull; Specialized Plays</p>
+  <p class="section-sub">Targeted templates for specific lead situations &mdash; the highest-intent moments in the funnel.</p>
+  <div class="grid">
+
+    <div class="card"><div class="card-body">
+      <span class="badge b-consol">Consolidation</span>
+      <h3>Consolidation Offer</h3>
+      <p class="purpose">For owners with stacked positions. Before/after payment comparison ($2,100/day &rarr; $850/day), 3-step relief roadmap.</p>
+      <div class="meta">
+        <div class="row"><span class="lbl">Subject</span><span class="subj"><em>Stacked advances draining {{business_name}}?</em></span></div>
+        <div class="row"><span class="lbl">Preview</span><span class="pv">Reply with 3 months of statements &mdash; see your new payment.</span></div>
+        <div class="row"><span class="lbl">Best for</span><span class="when">Multi-position / overleveraged leads</span></div>
+      </div>
+      <div class="btns">
+        <a href="consolidation_offer.html" class="btn-prev">Preview</a>
+        <a href="consolidation_offer.html" target="_blank" class="btn-tab">New Tab</a>
+        <button onclick="dl('consolidation_offer.html')" class="btn-dl">&#8595; Download</button>
+      </div>
+    </div></div>
+
+    <div class="card"><div class="card-body">
+      <span class="badge b-prequal">Pre-Qualified</span>
+      <h3>Pre-Qualified Offer</h3>
+      <p class="purpose">Personalized &ldquo;you&rsquo;re approved up to {{prequal_amount}}&rdquo; frame &mdash; a big specific number + one CTA. The highest-converting layout for screened leads.</p>
+      <div class="meta">
+        <div class="row"><span class="lbl">Subject</span><span class="subj"><em>{{business_name}} is pre-qualified</em></span></div>
+        <div class="row"><span class="lbl">Preview</span><span class="pv">No hard pull &mdash; confirm a few details to release it.</span></div>
+        <div class="row"><span class="lbl">Best for</span><span class="when">Enriched / screened leads</span></div>
+      </div>
+      <div class="btns">
+        <a href="pre_qualified.html" class="btn-prev">Preview</a>
+        <a href="pre_qualified.html" target="_blank" class="btn-tab">New Tab</a>
+        <button onclick="dl('pre_qualified.html')" class="btn-dl">&#8595; Download</button>
+      </div>
+    </div></div>
+
+    <div class="card"><div class="card-body">
+      <span class="badge b-reengage">Re-Engage</span>
+      <h3>Re-Engagement</h3>
+      <p class="purpose">Revive a stale lead (30&ndash;90+ days quiet). &ldquo;What&rsquo;s changed&rdquo; list + easy &ldquo;not yet&rdquo; reply option. Low pressure.</p>
+      <div class="meta">
+        <div class="row"><span class="lbl">Subject</span><span class="subj"><em>Is now a better time, {{business_name}}?</em></span></div>
+        <div class="row"><span class="lbl">Preview</span><span class="pv">Rates and approvals have improved since we spoke.</span></div>
+        <div class="row"><span class="lbl">Best for</span><span class="when">Cold / dormant leads</span></div>
+      </div>
+      <div class="btns">
+        <a href="re_engagement.html" class="btn-prev">Preview</a>
+        <a href="re_engagement.html" target="_blank" class="btn-tab">New Tab</a>
+        <button onclick="dl('re_engagement.html')" class="btn-dl">&#8595; Download</button>
+      </div>
+    </div></div>
+
+    <div class="card"><div class="card-body">
+      <span class="badge b-abandon">Recovery</span>
+      <h3>Application Abandoned</h3>
+      <p class="purpose">Recover a started-but-unfinished form. Progress bar (75%), &ldquo;pick up where you left off.&rdquo; Highest intent in the list &mdash; send within 1&ndash;24h.</p>
+      <div class="meta">
+        <div class="row"><span class="lbl">Subject</span><span class="subj"><em>You&rsquo;re almost done, {{first_name}}</em></span></div>
+        <div class="row"><span class="lbl">Preview</span><span class="pv">Pick up right where you left off &mdash; ~1 minute.</span></div>
+        <div class="row"><span class="lbl">Best for</span><span class="when">Form drop-offs</span></div>
+      </div>
+      <div class="btns">
+        <a href="application_abandoned.html" class="btn-prev">Preview</a>
+        <a href="application_abandoned.html" target="_blank" class="btn-tab">New Tab</a>
+        <button onclick="dl('application_abandoned.html')" class="btn-dl">&#8595; Download</button>
+      </div>
+    </div></div>
+
+    <div class="card"><div class="card-body">
+      <span class="badge b-referral">Referral</span>
+      <h3>Referral Ask</h3>
+      <p class="purpose">To funded clients &mdash; the warmest source of new deals. {{referral_reward}} reward, simple 3-step &ldquo;send a name&rdquo; flow.</p>
+      <div class="meta">
+        <div class="row"><span class="lbl">Subject</span><span class="subj"><em>Know another owner who could use this?</em></span></div>
+        <div class="row"><span class="lbl">Preview</span><span class="pv">They get capital, you get a thank-you.</span></div>
+        <div class="row"><span class="lbl">Best for</span><span class="when">Existing funded clients</span></div>
+      </div>
+      <div class="btns">
+        <a href="referral_ask.html" class="btn-prev">Preview</a>
+        <a href="referral_ask.html" target="_blank" class="btn-tab">New Tab</a>
+        <button onclick="dl('referral_ask.html')" class="btn-dl">&#8595; Download</button>
+      </div>
+    </div></div>
+
+  </div>
+
+</div>
+
+<div class="footer">
+  <p>SUN<span>BIZ</span> FUNDING &mdash; Email Library v2 (Sequence Edition)</p>
+  <p>12 templates &bull; CAN-SPAM compliant &bull; Soft-pull / no-hard-credit framing &bull; Mobile responsive</p>
+  <p>Subject-line options &amp; send timing are noted on each card and in the comments at the top of every file.</p>
+</div>
+
+<script>
+function dl(filename){
+  var a=document.createElement('a');
+  a.href=filename; a.download=filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+</script>
+
+</body>
+</html>

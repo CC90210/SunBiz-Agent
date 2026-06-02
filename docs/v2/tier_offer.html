@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<!--
+  ============================================================================
+  SUNBIZ FUNDING — SEQUENCE LIBRARY v2
+  TEMPLATE: Tier Offer (FLAGSHIP)  -- modeled on the proven MCA cold-email play
+  USE: Primary outbound offer. The "send 3 bank statements" reply mechanic +
+       the 3-tier qualification table is the highest-converting MCA structure.
+  FORMAT: Light-branded HTML  |  Best for warm/opted-in or 2nd-touch on a reply
+  SUBJECT OPTIONS:
+    A) Funding terms for {{business_name}}
+    B) {{first_name}} - your working-capital options
+    C) A concrete offer for {{business_name}}
+  PREVIEW TEXT: Send 3 months of statements and I'll send back a real number.
+  SWAP BEFORE SENDING:
+    - apply URL (search "form.jotform.com") -> Command Center form link
+    - factor rates / terms / qualification numbers -> confirm with underwriting
+    - {{rep_email}} is where statements should be sent
+  ============================================================================
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <title>Funding Terms — SunBiz Funding</title>
+  <!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+  <style type="text/css">
+    body,table,td,a { -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
+    table,td { mso-table-lspace:0pt; mso-table-rspace:0pt; }
+    body { margin:0!important; padding:0!important; background:#eef1f6;
+           font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; }
+    .container { max-width:600px; margin:0 auto; background:#ffffff; }
+    .header { background:linear-gradient(135deg,#001F54 0%,#0a2d6e 60%,#001F54 100%);
+              border-bottom:3px solid #D4A843; padding:26px 40px; text-align:center; }
+    .logo { font-size:26px; font-weight:800; color:#fff; letter-spacing:3px; margin:0; }
+    .logo span { color:#D4A843; }
+    .tag { font-size:12px; color:rgba(255,255,255,.75); margin:6px 0 0; letter-spacing:1px; }
+    .body { padding:32px 40px 12px; color:#1f2933; font-size:16px; line-height:1.6; }
+    .body p { margin:0 0 16px; }
+    .statements { margin:6px 0 20px; padding:16px 20px; background:#fff8e8;
+                  border:1px solid #e7cf91; border-left:4px solid #D4A843; border-radius:0 8px 8px 0; }
+    .statements b { color:#001F54; }
+    .consol { margin:0 0 20px; font-size:15px; color:#475569;
+              padding:12px 16px; background:#f6f8fb; border-radius:6px; }
+    .cta-wrap { text-align:center; margin:6px 0 26px; }
+    .cta { display:inline-block; background:#FF6B35; color:#fff!important; text-decoration:none;
+           font-size:16px; font-weight:700; padding:15px 46px; border-radius:8px; letter-spacing:.5px; }
+    .cta-sub { font-size:12px; color:#94a3b8; margin:10px 0 0; }
+    .terms-title { font-size:13px; font-weight:700; color:#001F54; text-transform:uppercase;
+                   letter-spacing:1px; text-align:center; margin:8px 0 16px; }
+    .tier-tbl { width:100%; border-collapse:separate; border-spacing:8px; }
+    .tier { background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:16px 14px;
+            vertical-align:top; width:33.33%; }
+    .tier.best { border:2px solid #D4A843; background:#fffdf6; }
+    .tier-name { font-size:13px; font-weight:800; color:#001F54; letter-spacing:.5px; margin:0 0 2px; }
+    .tier-flag { font-size:10px; font-weight:700; color:#b8860b; text-transform:uppercase; letter-spacing:.5px; display:block; margin-bottom:10px; min-height:13px; }
+    .tier-row { font-size:13px; color:#334155; line-height:1.5; margin:0 0 6px; }
+    .tier-row b { color:#001F54; }
+    .tier-qual { margin:10px 0 0; padding-top:10px; border-top:1px solid #e2e8f0; font-size:12px; color:#52606d; line-height:1.6; }
+    .tier-qual .q { display:block; }
+    .tier-qual .q b { color:#059669; }
+    .disc { font-size:11px; color:#94a3b8; line-height:1.6; margin:22px 0 8px; padding:12px 16px; background:#f8fafc; border-radius:6px; }
+    .sig { padding:0 40px 8px; color:#52606d; font-size:14px; line-height:1.6; }
+    .sig .name { font-weight:700; color:#001F54; font-size:15px; }
+    .footer { background:#0f172a; padding:24px 40px; text-align:center; }
+    .footer .fb { font-size:15px; font-weight:700; color:#fff; letter-spacing:2px; margin:0 0 8px; }
+    .footer .fb span { color:#D4A843; }
+    .footer .fa { font-size:12px; color:#64748b; margin:0 0 12px; line-height:1.6; }
+    .footer a { font-size:12px; color:#94a3b8; }
+    @media screen and (max-width:600px){
+      .body,.sig{ padding-left:22px!important; padding-right:22px!important; }
+      .header{ padding:22px!important; }
+      .tier-tbl,.tier-tbl tbody,.tier-tbl tr,.tier{ display:block!important; width:auto!important; }
+      .tier{ margin-bottom:8px!important; }
+      .cta{ padding:14px 34px!important; }
+    }
+  </style>
+</head>
+<body>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f6;">
+    <tr><td>
+      <table role="presentation" class="container" cellpadding="0" cellspacing="0" align="center" width="600">
+
+        <tr><td class="header">
+          <p class="logo">SUN<span>BIZ</span> FUNDING</p>
+          <p class="tag">Private Lending &amp; Working Capital</p>
+        </td></tr>
+
+        <tr><td class="body">
+          <p>Hi {{first_name}},</p>
+          <p>This is {{rep_name}} with SunBiz Funding. We provide fast, flexible working capital to growing businesses like {{business_name}} &mdash; for inventory, payroll, equipment, expansion, or simply evening out cash flow.</p>
+
+          <div class="statements">
+            <b>Want a concrete offer?</b> Reply with your last <b>3 months of business bank statements</b> and I&rsquo;ll send back real numbers &mdash; usually the same day. <b>Soft pull only</b>, so it won&rsquo;t touch your credit.
+          </div>
+
+          <div class="consol">
+            <b>Already have open positions?</b> We also consolidate stacked advances into one lower payment &mdash; ask me about it.
+          </div>
+
+          <div class="cta-wrap">
+            <a href="https://form.jotform.com/253155026259254" target="_blank" rel="noopener" class="cta">Apply Now &rarr;</a>
+            <p class="cta-sub">~2 minutes &bull; No hard credit pull &bull; Same-day decision</p>
+          </div>
+
+          <p class="terms-title">General Terms &amp; Qualification Tiers</p>
+          <table role="presentation" class="tier-tbl" cellpadding="0" cellspacing="0">
+            <tr>
+              <td class="tier best">
+                <p class="tier-name">TIER 1</p>
+                <span class="tier-flag">Best Terms</span>
+                <p class="tier-row"><b>Term:</b> 9&ndash;24 months</p>
+                <p class="tier-row"><b>Rate:</b> from 1.20 factor</p>
+                <p class="tier-row"><b>Payments:</b> weekly or daily</p>
+                <div class="tier-qual">
+                  <span class="q"><b>2+ yrs</b> in business</span>
+                  <span class="q">Under <b>3</b> negative days/mo</span>
+                  <span class="q"><b>2</b> open positions or fewer</span>
+                  <span class="q">Credit <b>600+</b></span>
+                </div>
+              </td>
+              <td class="tier">
+                <p class="tier-name">TIER 2</p>
+                <span class="tier-flag">Most Common</span>
+                <p class="tier-row"><b>Term:</b> 6&ndash;12 months</p>
+                <p class="tier-row"><b>Rate:</b> from 1.25 factor</p>
+                <p class="tier-row"><b>Payments:</b> weekly or daily</p>
+                <div class="tier-qual">
+                  <span class="q"><b>6+ mo</b> in business</span>
+                  <span class="q">Under <b>6</b> negative days/mo</span>
+                  <span class="q"><b>4</b> open positions or fewer</span>
+                  <span class="q">Credit <b>500+</b></span>
+                </div>
+              </td>
+              <td class="tier">
+                <p class="tier-name">TIER 3</p>
+                <span class="tier-flag">Rebuild / Startup</span>
+                <p class="tier-row"><b>Term:</b> 4&ndash;9 months</p>
+                <p class="tier-row"><b>Rate:</b> from 1.30 factor</p>
+                <p class="tier-row"><b>Payments:</b> weekly or daily</p>
+                <div class="tier-qual">
+                  <span class="q"><b>3+ mo</b> in business</span>
+                  <span class="q">Under <b>8</b> negative days/mo</span>
+                  <span class="q"><b>5+</b> positions OK</span>
+                  <span class="q">Credit <b>400+</b></span>
+                </div>
+              </td>
+            </tr>
+          </table>
+
+          <div class="disc">
+            Terms, factor rates, and qualification criteria are illustrative and subject to underwriting approval. Actual offers vary by business revenue, time in business, and account history. Business funding products only.
+          </div>
+        </td></tr>
+
+        <tr><td class="sig">
+          <p style="margin:0 0 4px;">Sincerely,</p>
+          <p style="margin:0;"><span class="name">{{rep_name}}</span><br />
+          {{rep_title}}, SunBiz Funding<br />
+          Send statements to: <a href="mailto:{{rep_email}}" style="color:#c2561f;font-weight:600;">{{rep_email}}</a> &bull; {{rep_phone}}</p>
+        </td></tr>
+
+        <tr><td class="footer">
+          <p class="fb">SUN<span>BIZ</span> FUNDING</p>
+          <p class="fa">1234 Business Ave, Suite 100 &bull; Miami, FL 33101<br />&copy; {{year}} SunBiz Funding. All rights reserved.</p>
+          <p style="margin:0;"><a href="https://form.jotform.com/253155026259254" target="_blank" rel="noopener">Apply for Funding</a> &nbsp;&bull;&nbsp; <a href="{{unsubscribe_url}}">Unsubscribe</a></p>
+          <p style="font-size:11px;color:#475569;margin:12px 0 0;line-height:1.6;">You received this commercial email because your business information is publicly listed or you previously expressed interest in funding. Unsubscribe requests are honored within 10 business days per CAN-SPAM.</p>
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<!--
+  ============================================================================
+  SUNBIZ FUNDING — SEQUENCE LIBRARY v2
+  TEMPLATE: Funding Grid Pro  -- refreshed "select your amount" broadcast
+  USE: Opted-in list / warm broadcast. Lets the reader self-select an amount;
+       every tile and the button go to the application.
+  FORMAT: Branded HTML  |  SUBJECT OPTIONS:
+    A) Working capital for {{business_name}}, from $5K-$100K
+    B) {{first_name}}, pick your funding amount
+  PREVIEW TEXT: Same-day decision, funds in as little as 24 hours.
+  SWAP BEFORE SENDING: apply URL; weekly payment estimates are illustrative.
+  ============================================================================
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <title>Pick Your Funding — SunBiz Funding</title>
+  <!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+  <style type="text/css">
+    body,table,td,a { -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
+    table,td { mso-table-lspace:0pt; mso-table-rspace:0pt; }
+    body { margin:0!important; padding:0!important; background:#eef1f6;
+           font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; }
+    .container { max-width:600px; margin:0 auto; background:#ffffff; }
+    .header { background:linear-gradient(135deg,#001F54 0%,#0a2d6e 60%,#001F54 100%);
+              border-bottom:3px solid #D4A843; padding:26px 40px; text-align:center; }
+    .logo { font-size:26px; font-weight:800; color:#fff; letter-spacing:3px; margin:0; }
+    .logo span { color:#D4A843; }
+    .tag { font-size:12px; color:rgba(255,255,255,.75); margin:6px 0 0; letter-spacing:1px; }
+    .banner { background:#D4A843; text-align:center; padding:9px 20px; }
+    .banner p { margin:0; font-size:12px; font-weight:700; color:#001F54; letter-spacing:.5px; }
+    .body { padding:30px 40px 14px; color:#1f2933; }
+    .greet { font-size:15px; color:#64748b; margin:0 0 8px; }
+    .h1 { font-size:25px; font-weight:800; color:#001F54; line-height:1.25; margin:0 0 14px; }
+    .h1 span { color:#059669; }
+    .intro { font-size:15px; color:#475569; line-height:1.7; margin:0 0 24px; }
+    .qual { background:#f0fdf4; border-left:4px solid #10b981; border-radius:0 8px 8px 0; padding:16px 20px; margin:0 0 26px; }
+    .qual h3 { font-size:12px; font-weight:700; color:#059669; text-transform:uppercase; letter-spacing:1px; margin:0 0 10px; }
+    .qual p { font-size:14px; color:#1e293b; margin:0 0 7px; }
+    .qual p:last-child { margin:0; }
+    .qual .ck { color:#10b981; font-weight:700; margin-right:6px; }
+    .stitle { font-size:13px; font-weight:700; color:#001F54; text-transform:uppercase; letter-spacing:1px; margin:0 0 12px; }
+    .grid { width:100%; border-collapse:separate; border-spacing:8px; margin:0 0 22px; }
+    .cell { background:#f8fafc; border:2px solid #e2e8f0; border-radius:10px; text-align:center; padding:14px 8px; width:33.33%; }
+    .cell a { text-decoration:none; display:block; }
+    .amt { font-size:21px; font-weight:800; color:#001F54; display:block; }
+    .wk { font-size:11px; color:#64748b; margin-top:4px; display:block; }
+    .cta-wrap { text-align:center; margin:4px 0 26px; }
+    .cta { display:inline-block; background:#FF6B35; color:#fff!important; text-decoration:none; font-size:16px; font-weight:700; padding:15px 46px; border-radius:8px; letter-spacing:.5px; }
+    .cta-sub { font-size:12px; color:#94a3b8; margin:10px 0 0; }
+    .vp { width:100%; border-collapse:collapse; margin:0 0 8px; }
+    .vpc { text-align:center; padding:10px 8px; width:33.33%; vertical-align:top; }
+    .vpi { font-size:22px; display:block; margin-bottom:6px; }
+    .vpt { font-size:13px; font-weight:700; color:#001F54; display:block; margin-bottom:3px; }
+    .vpd { font-size:12px; color:#64748b; line-height:1.5; }
+    .disc { font-size:11px; color:#94a3b8; line-height:1.6; margin:18px 0 8px; padding:12px 16px; background:#f8fafc; border-radius:6px; }
+    .footer { background:#0f172a; padding:24px 40px; text-align:center; }
+    .footer .fb { font-size:15px; font-weight:700; color:#fff; letter-spacing:2px; margin:0 0 8px; }
+    .footer .fb span { color:#D4A843; }
+    .footer .fa { font-size:12px; color:#64748b; margin:0 0 12px; line-height:1.6; }
+    .footer a { font-size:12px; color:#94a3b8; }
+    @media screen and (max-width:600px){
+      .body{ padding:24px 22px 12px!important; }
+      .header{ padding:22px!important; }
+      .h1{ font-size:21px!important; }
+      .grid tr{ display:flex!important; flex-wrap:wrap!important; }
+      .cell{ width:calc(50% - 8px)!important; box-sizing:border-box!important; }
+      .vp,.vp tbody,.vp tr,.vpc{ display:block!important; width:100%!important; }
+      .cta{ padding:14px 34px!important; }
+    }
+  </style>
+</head>
+<body>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f6;">
+    <tr><td>
+      <table role="presentation" class="container" cellpadding="0" cellspacing="0" align="center" width="600">
+
+        <tr><td class="header">
+          <p class="logo">SUN<span>BIZ</span> FUNDING</p>
+          <p class="tag">Private Lending &amp; Working Capital</p>
+        </td></tr>
+
+        <tr><td class="banner"><p>&#9889; FAST APPROVAL &nbsp;|&nbsp; SAME-DAY FUNDING &nbsp;|&nbsp; NO HARD CREDIT PULL</p></td></tr>
+
+        <tr><td class="body">
+          <p class="greet">Hi {{first_name}},</p>
+          <h1 class="h1">Capital Built for <span>Businesses Like {{business_name}}</span></h1>
+          <p class="intro">Funding tied to your revenue &mdash; not just your credit score. Pick the amount that fits, and you&rsquo;ll have a decision the same day.</p>
+
+          <div class="qual">
+            <h3>Simple Qualification Requirements</h3>
+            <p><span class="ck">&#10003;</span> Business checking account in good standing</p>
+            <p><span class="ck">&#10003;</span> $250K+ annual revenue ($20K+/month)</p>
+            <p><span class="ck">&#10003;</span> 1+ year in business</p>
+            <p><span class="ck">&#10003;</span> U.S.-based business</p>
+          </div>
+
+          <p class="stitle">Select Your Funding Amount</p>
+          <table role="presentation" class="grid" cellpadding="0" cellspacing="0">
+            <tr>
+              <td class="cell"><a href="https://form.jotform.com/253155026259254" target="_blank" rel="noopener"><span class="amt">$5K</span><span class="wk">~$125/wk</span></a></td>
+              <td class="cell"><a href="https://form.jotform.com/253155026259254" target="_blank" rel="noopener"><span class="amt">$10K</span><span class="wk">~$250/wk</span></a></td>
+              <td class="cell"><a href="https://form.jotform.com/253155026259254" target="_blank" rel="noopener"><span class="amt">$25K</span><span class="wk">~$600/wk</span></a></td>
+            </tr>
+            <tr>
+              <td class="cell"><a href="https://form.jotform.com/253155026259254" target="_blank" rel="noopener"><span class="amt">$50K</span><span class="wk">~$1,100/wk</span></a></td>
+              <td class="cell"><a href="https://form.jotform.com/253155026259254" target="_blank" rel="noopener"><span class="amt">$75K</span><span class="wk">~$1,600/wk</span></a></td>
+              <td class="cell"><a href="https://form.jotform.com/253155026259254" target="_blank" rel="noopener"><span class="amt">$100K</span><span class="wk">~$2,100/wk</span></a></td>
+            </tr>
+          </table>
+
+          <div class="cta-wrap">
+            <a href="https://form.jotform.com/253155026259254" target="_blank" rel="noopener" class="cta">Apply Now &rarr;</a>
+            <p class="cta-sub">Under 3 minutes &bull; No hard credit pull &bull; Same-day decisions</p>
+          </div>
+
+          <table role="presentation" class="vp" cellpadding="0" cellspacing="0">
+            <tr>
+              <td class="vpc"><span class="vpi">&#128176;</span><span class="vpt">Low Minimums</span><span class="vpd">Right-sized capital from $5K</span></td>
+              <td class="vpc"><span class="vpi">&#9889;</span><span class="vpt">Fast &amp; Easy</span><span class="vpd">Funded in as little as 24 hours</span></td>
+              <td class="vpc"><span class="vpi">&#129309;</span><span class="vpt">Flexible Terms</span><span class="vpd">Payments scale with revenue</span></td>
+            </tr>
+          </table>
+
+          <div class="disc">Weekly payment estimates are illustrative and vary by your specific funding terms. Subject to underwriting approval. Business funding products only.</div>
+        </td></tr>
+
+        <tr><td class="footer">
+          <p class="fb">SUN<span>BIZ</span> FUNDING</p>
+          <p class="fa">1234 Business Ave, Suite 100 &bull; Miami, FL 33101<br />&copy; {{year}} SunBiz Funding. All rights reserved.</p>
+          <p style="margin:0;"><a href="https://form.jotform.com/253155026259254" target="_blank" rel="noopener">Apply for Funding</a> &nbsp;&bull;&nbsp; <a href="{{unsubscribe_url}}">Unsubscribe</a></p>
+          <p style="font-size:11px;color:#475569;margin:12px 0 0;line-height:1.6;">You received this commercial email because your business information is publicly listed or you previously expressed interest in funding. Unsubscribe requests honored within 10 business days per CAN-SPAM.</p>
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>
