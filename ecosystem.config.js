@@ -22,13 +22,16 @@ const path = require('path');
 
 const IS_MAC = process.platform === 'darwin';
 const IS_WIN = process.platform === 'win32';
+const IS_LINUX = process.platform === 'linux';
 
 // SunBiz-Agent root per machine.
 const PROJECT_ROOT = IS_MAC
     ? path.join(os.homedir(), 'SunBiz-Agent')
     : (IS_WIN
         ? 'C:\\Users\\User\\SunBiz-Agent'
-        : path.join(os.homedir(), 'SunBiz-Agent'));
+        : (IS_LINUX
+            ? '/srv/sunbiz/sunbiz-agent'
+            : path.join(os.homedir(), 'SunBiz-Agent')));
 
 // Python interpreter — SunBiz-Agent reuses CEO-Agent's venv (sibling
 // repo) because they share the same Python deps (supabase, anthropic,
@@ -38,17 +41,20 @@ const BRAVO_ROOT = IS_MAC
     ? path.join(os.homedir(), 'CEO-Agent')
     : (IS_WIN
         ? 'C:\\Users\\User\\Business-Empire-Agent'
-        : path.join(os.homedir(), 'CEO-Agent'));
+        : (IS_LINUX
+            ? '/srv/sunbiz/ceo-agent'
+            : path.join(os.homedir(), 'CEO-Agent')));
 
-const PYTHON = IS_MAC
-    ? path.join(BRAVO_ROOT, '.venv', 'bin', 'python')
-    : path.join(BRAVO_ROOT, '.venv', 'Scripts', 'python.exe');
+// Linux (VPS) uses the POSIX venv layout (.venv/bin/python), same as Mac.
+const PYTHON = IS_WIN
+    ? path.join(BRAVO_ROOT, '.venv', 'Scripts', 'python.exe')
+    : path.join(BRAVO_ROOT, '.venv', 'bin', 'python');
 
 // pythonw.exe — Windows GUI variant. No console window even on crash
 // loops. Mac/Linux have no console concept here so fall back to python.
-const PYTHONW = IS_MAC
-    ? PYTHON
-    : path.join(BRAVO_ROOT, '.venv', 'Scripts', 'pythonw.exe');
+const PYTHONW = IS_WIN
+    ? path.join(BRAVO_ROOT, '.venv', 'Scripts', 'pythonw.exe')
+    : PYTHON;
 
 const apps = [];
 
