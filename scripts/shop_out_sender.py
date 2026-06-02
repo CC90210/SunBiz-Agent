@@ -84,7 +84,7 @@ import argparse
 import json
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
@@ -360,30 +360,43 @@ def _claim_pending(client, batch_size: int, tenant_id: Optional[str], *, dry_run
         return _select_pending(client, batch_size, tenant_id)
 
     limit = max(1, min(int(batch_size or 1), 100))
-    tenant_filter = ""
-    if tenant_id:
-        tenant_filter = f" AND tenant_id = {_sql_literal(tenant_id)}"
-    sql = (
-        "WITH candidates AS ("
-        "  SELECT id FROM public.application_lender_threads"
-        "  WHERE (status = 'pending'"
-        "     OR (status = 'sending' AND updated_at < now() - INTERVAL '30 minutes'))"
-        f"{tenant_filter}"
-        "  ORDER BY created_at ASC"
-        f"  LIMIT {limit}"
-        "  FOR UPDATE SKIP LOCKED"
-        "), claimed AS ("
-        "  UPDATE public.application_lender_threads t"
-        "     SET status = 'sending', last_error = NULL, updated_at = now()"
-        "    FROM candidates c"
-        "   WHERE t.id = c.id"
-        "  RETURNING t.id, t.application_id, t.lender_id, t.tenant_id, t.subject,"
-        "            t.body_template, t.attachments, t.cc_emails, t.status, t.created_at,"
-        "            t.owner_phone"  # migration 069: rep phone for {{owner_phone}} substitution
-        ") SELECT * FROM claimed"
+    cols = (
+        "id, application_id, lender_id, tenant_id, subject, "
+        "body_template, attachments, cc_emails, status, created_at, owner_phone"
     )
-    res = client.rpc("exec_sql", {"sql_query": sql}).execute()
-    return _rows_from_exec_sql(res)
+    # Two-step claim. The previous single data-modifying CTE (WITH ... UPDATE
+    # ... RETURNING) was passed through the exec_sql RPC, which nests it and
+    # makes Postgres reject it ("WITH clause containing a data-modifying
+    # statement must be at the top level"), so the daemon erroring every tick.
+    # Select pending (or crash-stale 'sending') candidates, then flip them to
+    # 'sending'. This drops the FOR UPDATE SKIP LOCKED guard, which is safe
+    # here: shop_out is cron-driven through a single claude-bridge-ping poller
+    # (debounced to one run per minute), so there is no concurrent claimer.
+    # Keep it single-instance.
+    stale_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+    q = (
+        client.table("application_lender_threads")
+        .select(cols)
+        .or_(f"status.eq.pending,and(status.eq.sending,updated_at.lt.{stale_cutoff})")
+        .order("created_at", desc=False)
+        .limit(limit)
+    )
+    if tenant_id:
+        q = q.eq("tenant_id", tenant_id)
+    candidates = list(q.execute().data or [])
+    if not candidates:
+        return []
+    ids = [c["id"] for c in candidates]
+    client.table("application_lender_threads").update(
+        {
+            "status": "sending",
+            "last_error": None,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+    ).in_("id", ids).execute()
+    for c in candidates:
+        c["status"] = "sending"
+    return candidates
 
 
 def _mark_sent(

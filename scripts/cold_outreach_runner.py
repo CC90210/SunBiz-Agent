@@ -441,8 +441,12 @@ def tick() -> int:
         campaigns = (
             sb.table("cold_outreach_campaigns")
             .select(
+                # 'brand' column is not in the live cold_outreach_campaigns
+                # schema; selecting it 400s. campaign.get("brand") below already
+                # defaults to "oasis", so omit it here. Re-add this column (and a
+                # migration) if/when per-campaign branding is introduced.
                 "id, tenant_id, status, channel, message_body, subject, "
-                "daily_cap, sent_count, failed_count, total_recipients, brand"
+                "daily_cap, sent_count, failed_count, total_recipients"
             )
             .in_("status", ["queued", "sending"])
             .order("created_at", desc=False)
