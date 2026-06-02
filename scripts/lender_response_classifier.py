@@ -585,7 +585,7 @@ def _persist_lender_feedback(sb, thread: dict, label: str) -> None:
             .eq("tenant_id", tenant_id)
             .eq("entity_type", "application")
             .eq("id", application_id)
-            .maybeSingle()
+            .maybe_single()
             .execute()
         )
         app_data = (app_row.data or {}).get("data") or {}

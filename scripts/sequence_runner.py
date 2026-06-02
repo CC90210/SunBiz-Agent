@@ -528,7 +528,7 @@ def _build_context(sb, tenant_id: str, lead_id: str, payload: dict) -> dict:
             .eq("tenant_id", tenant_id)
             .eq("entity_type", "lead")
             .eq("id", lead_id)
-            .maybeSingle()
+            .maybe_single()
             .execute()
         )
         if lead_row.data:
@@ -732,7 +732,7 @@ def execution_tick(sb) -> int:
                 sb.table("drip_sequences")
                 .select("id, tenant_id, name, steps, enabled")
                 .eq("id", row["sequence_id"])
-                .maybeSingle()
+                .maybe_single()
                 .execute()
             )
         except Exception as e:

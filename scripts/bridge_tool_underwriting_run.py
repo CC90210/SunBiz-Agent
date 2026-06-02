@@ -89,7 +89,7 @@ def underwriting_run(
         .select("id, tenant_id, data")
         .eq("id", application_id)
         .eq("entity_type", "application")
-        .maybeSingle()
+        .maybe_single()
         .execute()
     )
     if not app_row.data:
@@ -105,7 +105,7 @@ def underwriting_run(
         .eq("application_id", application_id)
         .in_("status", ["pending", "parsing"])
         .limit(1)
-        .maybeSingle()
+        .maybe_single()
         .execute()
     )
     if in_flight.data:
@@ -160,7 +160,7 @@ def underwriting_run(
                     "debt_to_revenue_ratio, lender_count, error_message"
                 )
                 .eq("id", run_id)
-                .maybeSingle()
+                .maybe_single()
                 .execute()
             )
         except Exception:
@@ -191,7 +191,7 @@ def underwriting_run(
                     .select("data")
                     .eq("id", application_id)
                     .eq("tenant_id", tenant_id)
-                    .maybeSingle()
+                    .maybe_single()
                     .execute()
                 )
                 current_data = (app_now.data or {}).get("data") or {}

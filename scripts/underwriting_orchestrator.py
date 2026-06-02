@@ -354,7 +354,7 @@ def _process_row(sb, row: dict) -> None:
                 .eq("tenant_id", tenant_id)
                 .eq("entity_type", "application")
                 .eq("id", application_id)
-                .maybeSingle()
+                .maybe_single()
                 .execute()
             )
             parent_lead_id = (app_lead_row.data or {}).get("lead_id") if app_lead_row.data else None
@@ -428,7 +428,7 @@ def _process_row(sb, row: dict) -> None:
             .eq("tenant_id", tenant_id)
             .eq("entity_type", "application")
             .eq("id", application_id)
-            .maybeSingle()
+            .maybe_single()
             .execute()
         )
         app_data: dict = (app_row.data or {}).get("data") or {}
