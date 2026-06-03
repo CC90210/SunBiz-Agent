@@ -145,4 +145,36 @@ apps.push({
     max_size: "10M",
 });
 
+// ============================================================================
+// cold-outreach-runner — scheduled outbound blast scheduler (Build 3)
+// ============================================================================
+//
+// Promotes scheduled cold_outreach_campaigns (draft -> queued when
+// scheduled_for <= now UTC) and drains queued campaigns through send_gateway
+// (email + SMS via TextTorrent/Twilio; provider derived from the campaign
+// channel). daily-cap enforced in BOTH the runner and send_gateway (defense
+// in depth). 30s tick; restart_delay 30000ms so a crash-loop backs off.
+apps.push({
+    name: "sunbiz-cold-outreach-runner",
+    script: "scripts/cold_outreach_runner.py",
+    args: ["loop", "--interval", "30"],
+    interpreter: PYTHONW,
+    cwd: PROJECT_ROOT,
+    watch: false,
+    autorestart: true,
+    max_restarts: 20,
+    restart_delay: 30000,
+    windowsHide: true,
+    env: {
+        PYTHONIOENCODING: "utf-8",
+        PYTHONUNBUFFERED: "1",
+        BRAVO_AGENT_ROOT: BRAVO_ROOT,
+    },
+    log_date_format: "YYYY-MM-DD HH:mm:ss",
+    error_file: "tmp/pm2-cold-outreach-error.log",
+    out_file: "tmp/pm2-cold-outreach-out.log",
+    merge_logs: true,
+    max_size: "10M",
+});
+
 module.exports = { apps };

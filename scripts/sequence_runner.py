@@ -486,6 +486,12 @@ def enrollment_tick(sb) -> int:
         lead_id = None
         if payload.get("entity") == "lead":
             lead_id = payload.get("record_id")
+        elif event_type == "NO_CONTACT_24H":
+            # Build 1: the no_contact_24h_monitor carries lead_id directly in
+            # the payload (no entity/record_id shape). The drip_sequences
+            # lookup above already matches trigger_event generically, so the
+            # only NO_CONTACT_24H-specific handling needed is this id extraction.
+            lead_id = payload.get("lead_id")
         if not lead_id:
             continue
 
@@ -630,6 +636,17 @@ def _send_step(sb, state_row: dict, sequence: dict) -> dict:
                 intent="commercial",
             )
         elif channel == "sms":
+            # Build 2: optional per-step SMS provider override. Code-layer
+            # validation is the hard gate (the TS step parser validates too).
+            # When BOTH TextTorrent and Twilio are configured, send_gateway
+            # defaults to TextTorrent unless an explicit provider is passed —
+            # so a step that wants Twilio MUST set sms_provider='twilio'.
+            sms_provider = step.get("sms_provider")
+            if sms_provider is not None and sms_provider not in ("texttorrent", "twilio", "kixie"):
+                return {
+                    "outcome": "permanent",
+                    "detail": f"invalid sms_provider '{sms_provider}' (expected texttorrent|twilio|kixie)",
+                }
             res = send(
                 channel="sms",
                 to_phone=to_phone,
@@ -638,6 +655,8 @@ def _send_step(sb, state_row: dict, sequence: dict) -> dict:
                 agent_source=f"sequence:{sequence.get('name') or sequence.get('id')}",
                 brand="oasis",
                 intent="commercial",
+                sms_provider=sms_provider,
+                metadata={"sms_provider": sms_provider} if sms_provider else None,
             )
         else:
             return {"outcome": "permanent", "detail": f"unknown channel '{channel}'"}

@@ -351,21 +351,40 @@ def _process_campaign(sb, campaign: dict[str, Any], send_fn) -> None:
         rendered_body = _substitute_vars(message_body, rec, lead)
         rendered_subject = _substitute_vars(subject, rec, lead)
 
-        # Build send_gateway kwargs
+        # Build send_gateway kwargs. The campaign.channel is one of
+        # 'email'|'sms'|'sms_texttorrent'|'sms_twilio' (migration 069), but
+        # send_gateway only knows channel 'email'|'sms' — the SMS vendor is
+        # distinguished by sms_provider. Map here (Build 3). Without this,
+        # send_gateway rejects 'sms_twilio'/'sms_texttorrent' as unknown channels.
+        sms_provider: Optional[str] = None
+        if channel in ("sms", "sms_texttorrent", "sms_twilio"):
+            gw_channel = "sms"
+            if channel == "sms_twilio":
+                sms_provider = "twilio"
+            elif channel == "sms_texttorrent":
+                sms_provider = "texttorrent"
+        else:
+            gw_channel = "email"
+
         send_kwargs: dict[str, Any] = {
-            "channel": channel,
+            "channel": gw_channel,
             "body_text": rendered_body,
             "agent_source": DAEMON_NAME,
             "brand": campaign.get("brand") or "oasis",
             "intent": "commercial",
         }
-        if channel == "email":
+        if gw_channel == "email":
             send_kwargs["to_email"] = merged_address
             send_kwargs["subject"] = rendered_subject
             if rendered_body:
                 send_kwargs["body_html"] = rendered_body
-        elif channel == "sms":
+        else:
             send_kwargs["to_phone"] = merged_address
+            if sms_provider:
+                # Explicit provider — required to force Twilio when both
+                # TextTorrent and Twilio are configured (else TT is default).
+                send_kwargs["sms_provider"] = sms_provider
+                send_kwargs["metadata"] = {"sms_provider": sms_provider}
 
         if cold_lead_id:
             send_kwargs["lead_id"] = cold_lead_id
@@ -424,12 +443,41 @@ def _process_campaign(sb, campaign: dict[str, Any], send_fn) -> None:
 # ─────────────────────────────────────────────────────────────────────
 
 
+def _promote_scheduled_campaigns(sb) -> int:
+    """Build 3: promote scheduled campaigns whose time has come.
+
+    UPDATE cold_outreach_campaigns SET status='queued' WHERE status='draft'
+    AND scheduled_for <= now() (UTC). A SQL NULL scheduled_for never satisfies
+    `<=`, so unscheduled drafts are left alone without an explicit not-null
+    filter. A promoted campaign is drained on the NEXT tick (tick() pulls one
+    queued/sending campaign after this runs). Returns the number promoted."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        res = (
+            sb.table("cold_outreach_campaigns")
+            .update({"status": "queued"})
+            .eq("status", "draft")
+            .lte("scheduled_for", now_iso)
+            .execute()
+        )
+        promoted = len(res.data or [])
+        if promoted:
+            _log(f"promoted {promoted} scheduled campaign(s) draft->queued")
+        return promoted
+    except Exception as e:
+        _log(f"promote_scheduled failed: {e}")
+        return 0
+
+
 def tick() -> int:
     """Run one processing tick. Returns number of recipients processed."""
     sb = _supabase()
     if not sb:
         _log("supabase unavailable — skipping tick")
         return 0
+
+    # Build 3: feed the queue from scheduled drafts before draining it.
+    _promote_scheduled_campaigns(sb)
 
     send_fn = _send_gateway_fn()
     if send_fn is None:
