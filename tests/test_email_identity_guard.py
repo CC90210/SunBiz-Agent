@@ -30,9 +30,18 @@ SNIPPET = (
 
 def run(env_overrides):
     env = dict(os.environ)
-    # Clear any inherited sender so scenarios are deterministic.
-    for k in ("GMAIL_USER", "GMAIL_ADDRESS", "GMAIL_APP_PASSWORD", "EMAIL_REQUIRE_FROM_DOMAIN"):
-        env.pop(k, None)
+    # Hermeticity: email_blast calls load_dotenv(.env.agents) at import with
+    # override=False, which BACKFILLS any sender key we merely delete from the
+    # env — so on a provisioned host (real GMAIL_USER=submissions@sunbizfunding.com)
+    # the "negative" scenarios would resolve to a valid sender and wrongly SEND.
+    # Neutralize the sender keys by setting them to "" (a present-but-empty env
+    # var is NOT overridden by load_dotenv), so the file can't reintroduce an
+    # identity. Each case's overrides then win. EMAIL_REQUIRE_FROM_DOMAIN is
+    # left to the case (absent -> module default "sunbizfunding.com"; the
+    # opt-out case sets it to "").
+    for k in ("GMAIL_USER", "GMAIL_ADDRESS", "GMAIL_APP_PASSWORD"):
+        env[k] = ""
+    env.pop("EMAIL_REQUIRE_FROM_DOMAIN", None)
     env.update(env_overrides)
     out = subprocess.run(
         [sys.executable, "-c", SNIPPET], env=env, capture_output=True, text=True
