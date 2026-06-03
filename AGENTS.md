@@ -92,8 +92,11 @@ For anything Ezra asks about recent activity: read `memory/SESSION_LOG.md` FIRST
 |------|------|
 | Health check | `python scripts/doctor.py` |
 | Start API server | `python scripts/api_server.py` |
-| SMS send / status | `python scripts/sms_engine.py` |
-| Email outreach | `python scripts/email_blast.py` |
+| Send ONE-OFF email | `python ~/Business-Empire-Agent/scripts/integrations/send_gateway.py send --channel email --to <addr> --subject "..." --body-html "..." --brand sunbiz --agent-source solara` — the ONLY one-off email path (sends FROM submissions@sunbizfunding.com, CCs the assigned rep, enforces TCPA/CASL). **Do NOT use `email_blast.py` or SMTP for one-off sends** — wrong identity + guarded. |
+| Send ONE-OFF SMS / text | `python ~/Business-Empire-Agent/scripts/integrations/send_gateway.py send --channel sms --to <e164> --body "..." --brand sunbiz --agent-source solara` |
+| Quick underwriting / pre-screen a deal | `python scripts/underwriting_orchestrator.py score --deal-id <id> --json` |
+| BATCH email campaign (drips/blasts ONLY, never one-off) | `python scripts/email_blast.py` |
+| SMS engine status (batch) | `python scripts/sms_engine.py status` |
 | JotForm leads | `python scripts/jotform_tracker.py` |
 | Supabase query | `python scripts/supabase_tool.py` |
 | Fetch URL (auto-escalating) | `python scripts/research_fetch.py <url> --json` |
