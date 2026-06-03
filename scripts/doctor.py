@@ -108,7 +108,9 @@ def check_key_group(
 
 
 def run_gmail_login(env: dict[str, str]) -> Check:
-    address = resolve_env("GMAIL_ADDRESS", env)
+    # GMAIL_USER is the canonical key (written by provision_secrets + read by
+    # send_gateway/email_blast); fall back to GMAIL_ADDRESS for back-compat.
+    address = resolve_env("GMAIL_USER", env) or resolve_env("GMAIL_ADDRESS", env)
     password = resolve_env("GMAIL_APP_PASSWORD", env)
     if not (key_is_configured(address) and key_is_configured(password)):
         return Check(
