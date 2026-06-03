@@ -72,8 +72,8 @@ Ezra's profile (role, team, priorities, comm channels) lives in `brain/USER.md`.
 | Daily brief / call sheet | `python scripts/daily_plan_generator.py run --date today --json` | No |
 | Read Supabase table | `python ~/Business-Empire-Agent/scripts/integrations/supabase_tool.py query "SELECT * FROM <table> WHERE tenant_id='sunbiz' LIMIT 10"` | No |
 | Write to Supabase | `python ~/Business-Empire-Agent/scripts/integrations/supabase_tool.py insert <table> --data '...'` | **Yes — mutating** |
-| Send email to merchant | `python scripts/send_gateway.py send --channel email ...` | **Yes — outbound** |
-| Send SMS to merchant | `python scripts/send_gateway.py send --channel sms ...` | **Yes — outbound** |
+| Send email to merchant | `python ~/Business-Empire-Agent/scripts/integrations/send_gateway.py send --channel email --to <addr> --cc <assigned_rep_email> --subject "..." --body-html "..." --brand sunbiz --agent-source solara` — this is the ONLY email path. It sends FROM the shared submissions@sunbizfunding.com identity and CCs the assigned rep. **Do NOT glob/grep for email_blast or SMTP scripts** (that path sends from the wrong identity and is guarded). | **Yes — outbound** |
+| Send SMS to merchant | `python ~/Business-Empire-Agent/scripts/integrations/send_gateway.py send --channel sms --to <e164> --body "..." --brand sunbiz --agent-source solara` | **Yes — outbound** |
 | Start drip sequence | `python scripts/sequence_runner.py start --lead-id <id> --sequence <name>` | **Yes — outbound** |
 | Generate follow-up draft | `python scripts/follow_up_generator.py draft --lead-id <id> --context "<context>"` | No (draft only) |
 | Post handoff to Helios | `python scripts/agent_inbox.py post --to helios --message "<msg>"` | No |

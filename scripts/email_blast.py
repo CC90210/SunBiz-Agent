@@ -89,12 +89,51 @@ if not _logger.handlers:
 # Constants & paths
 # ---------------------------------------------------------------------------
 
-GMAIL_ADDRESS: str = os.getenv("GMAIL_ADDRESS", "")
+# GMAIL_USER is the canonical key used by CEO-Agent send_gateway.py + the
+# provision_secrets sync; honor it first, fall back to GMAIL_ADDRESS for
+# back-compat. On the SunBiz VPS this resolves to submissions@sunbizfunding.com.
+GMAIL_ADDRESS: str = os.getenv("GMAIL_USER") or os.getenv("GMAIL_ADDRESS", "")
 GMAIL_APP_PASSWORD: str = os.getenv("GMAIL_APP_PASSWORD", "")
 FROM_NAME: str = os.getenv("EMAIL_FROM_NAME", "SunBiz Funding")
 UNSUBSCRIBE_BASE_URL: str = os.getenv(
     "EMAIL_UNSUBSCRIBE_BASE_URL", "https://sunbizfunding.com/unsubscribe"
 )
+
+# Hard sender-identity guard (added 2026-06 after a SunBiz send went out from
+# the operator's personal Gmail because the bridge ran on the operator's Mac
+# with their local GMAIL_ADDRESS). SunBiz must only ever send as its own
+# domain. The guard refuses to authenticate/send when GMAIL_ADDRESS is not on
+# the required domain. Set EMAIL_REQUIRE_FROM_DOMAIN="" to opt out (not
+# recommended). Canonical SunBiz identity is submissions@sunbizfunding.com.
+REQUIRE_FROM_DOMAIN: str = os.getenv("EMAIL_REQUIRE_FROM_DOMAIN", "sunbizfunding.com").strip().lower()
+
+
+def _assert_sender_identity() -> None:
+    """Raise if the configured sender is not on the required domain.
+
+    Prevents the SunBiz agent from ever sending as a non-SunBiz account (e.g.
+    the operator's personal Gmail when the bridge runs on their machine).
+    """
+    if not REQUIRE_FROM_DOMAIN:
+        return  # explicitly disabled
+    addr = (GMAIL_ADDRESS or "").strip().lower()
+    # Exact-domain match (not endswith): require exactly one "@" and the domain
+    # part to equal REQUIRE_FROM_DOMAIN exactly. This rejects subdomains
+    # (x@mail.sunbizfunding.com), look-alikes (x@evilsunbizfunding.com), and
+    # double-"@" malformed senders — closing any ambiguity in the suffix check.
+    domain = addr.rsplit("@", 1)[1] if "@" in addr else ""
+    if not addr or addr.count("@") != 1 or domain != REQUIRE_FROM_DOMAIN:
+        raise RuntimeError(
+            "Refusing to send: sender identity '"
+            + (GMAIL_ADDRESS or "<unset>")
+            + "' is not on the required SunBiz domain @"
+            + REQUIRE_FROM_DOMAIN
+            + ". The bridge must run with SunBiz's own GMAIL_USER "
+            + "(submissions@sunbizfunding.com) + GMAIL_APP_PASSWORD — not the "
+            + "operator's personal credentials. Provision the secrets file on "
+            + "the VPS from the tenant credential store, or set "
+            + "EMAIL_REQUIRE_FROM_DOMAIN to override."
+        )
 
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
@@ -328,6 +367,7 @@ def _get_smtp_connection() -> smtplib.SMTP:
     except Exception:
         _logger.debug("SMTP connection stale — reconnecting")
 
+    _assert_sender_identity()  # never authenticate as a non-SunBiz account
     smtp = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30)
     smtp.ehlo()
     smtp.starttls()
@@ -386,9 +426,15 @@ def send_single_email(
     html_body: str,
     from_name: str = FROM_NAME,
     dry_run: bool = False,
+    cc_email: Optional[str] = None,
 ) -> bool:
     """
-    Send one HTML email via Gmail SMTP.
+    Send one HTML email via Gmail SMTP, as SunBiz's own shared identity.
+
+    NOTE: For prospect-facing sends the canonical path is CEO-Agent
+    send_gateway.py (CASL/cooldown/caps + assigned-rep CC + audit). This
+    helper is the low-level transport; it now refuses to send unless the
+    configured sender is on SunBiz's domain (see _assert_sender_identity).
 
     Args:
         to_email:  Recipient address.
@@ -396,18 +442,28 @@ def send_single_email(
         html_body: Full HTML body (already personalised).
         from_name: Display name in From header.
         dry_run:   If True, skip the actual send and log only.
+        cc_email:  Optional CC (e.g. the assigned rep for the deal).
 
     Returns:
         True on success, False on failure.
     """
+    # Validate identity up front so a misconfigured (non-SunBiz) sender fails
+    # loudly even in dry-run, instead of silently sending as the wrong account.
+    _assert_sender_identity()
+
     if dry_run:
-        _logger.info("[DRY RUN] Would send to %s | subject: %s", to_email, subject)
+        _logger.info(
+            "[DRY RUN] Would send as %s to %s%s | subject: %s",
+            GMAIL_ADDRESS, to_email, f" (cc {cc_email})" if cc_email else "", subject,
+        )
         return True
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = f"{from_name} <{GMAIL_ADDRESS}>"
     msg["To"] = to_email
+    if cc_email:
+        msg["Cc"] = cc_email
     msg["List-Unsubscribe"] = f"<mailto:{GMAIL_ADDRESS}?subject=unsubscribe>"
     msg["X-Mailer"] = "SunBiz-EmailBlast/2.0"
 
@@ -420,8 +476,9 @@ def send_single_email(
 
     _throttle()
 
+    recipients = [to_email] + ([cc_email] if cc_email else [])
     smtp = _get_smtp_connection()
-    smtp.sendmail(GMAIL_ADDRESS, to_email, msg.as_string())
+    smtp.sendmail(GMAIL_ADDRESS, recipients, msg.as_string())
     return True
 
 

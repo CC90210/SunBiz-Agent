@@ -130,7 +130,7 @@ Ready to shop: [YES / NO — reason if no]
 1. Generate renewal proposal parameters: `# Phase 6.6 — renewal estimate is computed page-load by the dashboard's Renewals tab (see renewals_v2 in lib/manifest/seeds.ts). No CLI yet; query funded_deal + compute (funded_amount * 1.10) - remaining_balance as a first-pass estimate.` (estimates renewal amount based on remaining balance + typical renewal terms).
 2. Draft renewal outreach: `python scripts/follow_up_generator.py draft --lead-id <id> --context "renewal"`.
 3. Confirm draft with Ezra or route to Helios.
-4. After approval: `python scripts/send_gateway.py send --channel email --template renewal_v1 --lead-id <id>` (send_gateway enforces TCPA/CASL).
+4. After approval: `python ~/Business-Empire-Agent/scripts/integrations/send_gateway.py send --channel email --lead-id <id> --cc <assigned_rep_email> --subject "..." --body-html "<draft body from step 2>" --brand sunbiz --agent-source solara` (sends FROM the shared submissions@sunbizfunding.com identity, CCs the assigned rep, enforces TCPA/CASL). **Do NOT use email_blast / direct SMTP** — that path is guarded and sends from the wrong identity.
 5. Update deal state: `# Update via dashboard API: PATCH /api/manifest/sun/records/application/<id> with body {data: {status: 'renewal_outreach_sent'}} (no direct DB write — keeps audit log clean)`.
 
 **Verification:**
