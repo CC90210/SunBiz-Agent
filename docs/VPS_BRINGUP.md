@@ -1,116 +1,161 @@
 # SunBiz VPS bring-up runbook
 
-> Cold-start a Linux VPS to run the SunBiz daemon stack. Eight steps, ~30 minutes once the VPS exists.
-> Last updated: 2026-05-25 (mirrors CEO-Agent commit `3e3c917`; matches the playbook at
-> `oasis-command-center/content/playbooks/08-sunbiz-production-pre-flight.md` § Section 9).
+> Cold-start a Linux VPS to run the SunBiz daemon stack.
+> Last updated: 2026-06-03 — **corrected to the `/srv/sunbiz` layout** that both
+> `ecosystem.config.js` files hardcode for Linux and that the live VPS uses. The
+> prior `~/business-empire-agent` / `~/SunBiz-Agent` layout was wrong: the
+> ecosystems' Linux branch pins `PROJECT_ROOT=/srv/sunbiz/{ceo-agent,sunbiz-agent}`
+> and the interpreter `/srv/sunbiz/ceo-agent/.venv/bin/python`, so home-dir clones
+> would crash. `scripts/vps_bootstrap.sh` in CEO-Agent automates Steps 1–3.
 
 ## What you're deploying
 
-Five long-running processes that own the SunBiz operator workflow:
+**5 PM2 processes** (2 from CEO-Agent's ecosystem, 3 from SunBiz-Agent's) plus
+**cron-driven jobs** that fire through the bridge poller:
 
-| Process | Owner | What it does |
-|---|---|---|
-| `event-router` | CEO-Agent (mirrored here as scripts/_archive) | Tails `agent_events` from Postgres into `state/event_router.log`; feeds the dashboard's `/feed` page |
-| `sequence-runner` | This repo + CEO-Agent | Drip-campaign enrolment + execution; routes every send through `send_gateway` (CASL + cooldown + daily-cap) |
-| `lender-response-classifier` | This repo + CEO-Agent | Polls Gmail for replies on shop-out threads; Claude Haiku classifies into approved/declined/info_requested |
-| `claude-bridge-ping` | CEO-Agent | Heartbeats `/api/bridge/ping` so the dashboard knows the VPS is online + polls tenant cron-jobs and dispatches them |
-| `shop_out_sender` (cron-driven) | This repo | Bridge-side SMTP sender that drains `application_lender_threads` rows at `status='pending'`. Not a PM2 daemon — fires through the tenant cron poller using manifest key `shop_out_sender_loop` |
+| Process | PM2 name | Ecosystem | What it does |
+|---|---|---|---|
+| Event router | `event-router` | CEO-Agent | Tails `agent_events` into `state/event_router.log`; feeds the dashboard `/feed` |
+| Bridge ping + cron poller | `claude-bridge-ping` | CEO-Agent | Heartbeats `/api/bridge/ping`; polls tenant cron-jobs and dispatches the cron-driven daemons |
+| Sequence runner | `sunbiz-sequence-runner` | SunBiz-Agent | Drip enrolment + execution; every send via `send_gateway` (CASL + cooldown + cap) |
+| Lender reply classifier | `sunbiz-lender-response-classifier` | SunBiz-Agent | Polls Gmail for shop-out replies; Haiku classifies approved/declined/info_requested |
+| Cold outreach runner | `sunbiz-cold-outreach-runner` | SunBiz-Agent | Cold-outreach send loop (registered as `cold_outreach_runner` agent_source) |
 
-You're NOT deploying `bravo-telegram` (the Telegram bridge stays on Bravo's Windows workstation — same bot token from two hosts = random message routing), `bravo-scheduler` (empire-only), or `dashboard-email-consumer` (empire-only, gated by `IS_WIN`).
+**Cron-driven (NOT PM2 apps — fire via `claude-bridge-ping`'s poller after pairing + seed):**
+`shop_out_sender` (manifest `shop_out_sender_loop`), `renewal_reminder`,
+`follow_up_generator`, `daily_plan_generator`, `underwriting_orchestrator`.
+
+You're NOT deploying `bravo-telegram` (Telegram stays on Bravo's Windows host — same
+bot token from two hosts = random routing), `bravo-scheduler` (empire-only), or
+`dashboard-email-consumer` (empire-only, `IS_WIN`-gated).
 
 ---
 
-## Step 1 — Clone both repos
+## Step 1 — Provision + clone both repos into `/srv/sunbiz`
+
+Fastest path: run `sudo bash scripts/vps_bootstrap.sh` from a CEO-Agent checkout —
+it installs packages, creates the `bravo` user, clones both repos to
+`/srv/sunbiz/{ceo-agent,sunbiz-agent}`, builds both `.venv`s, and writes the
+`.env.agents` placeholder. To do it by hand:
 
 ```bash
 sudo apt update && sudo apt install -y git python3.12 python3.12-venv python3-pip nodejs npm
-cd ~
-git clone https://github.com/CC90210/SunBiz-Agent.git
-git clone https://github.com/CC90210/CEO-Agent.git business-empire-agent
+sudo install -d -o "$USER" -g "$USER" /srv/sunbiz
+git clone https://github.com/CC90210/CEO-Agent.git    /srv/sunbiz/ceo-agent
+git clone https://github.com/CC90210/SunBiz-Agent.git /srv/sunbiz/sunbiz-agent
 ```
 
-The CEO-Agent repo is required because `ecosystem.config.js` lives there and the PM2 daemons (`event-router`, `sequence-runner`, `lender-response-classifier`, `claude-bridge-ping`) run from there. SunBiz-Agent is the authoritative storage for SunBiz-specific business logic per the 2026-05-15 policy (commit `7d34f2e`); the runtime copies are in CEO-Agent.
+The CEO-Agent repo is required: `ecosystem.config.js` lives there, the PM2
+interpreter is `/srv/sunbiz/ceo-agent/.venv/bin/python`, and the SunBiz daemons
+resolve `send_gateway` + the shared substrate from it.
 
-## Step 2 — Run the SunBiz setup wizard
+## Step 2 — Virtualenvs (`.venv` in BOTH repos)
+
+CEO's `.venv` is the interpreter for ALL daemons (the SunBiz PM2 apps point at it,
+and the cron poller execs SunBiz scripts with it), so it must carry BOTH repos'
+deps. SunBiz's own `.venv` is for manual `doctor.py` / `cron_registry.py` runs.
 
 ```bash
-cd ~/SunBiz-Agent
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python scripts/setup.py
+# CEO-Agent venv — both repos' requirements
+cd /srv/sunbiz/ceo-agent
+python3.12 -m venv .venv && . .venv/bin/activate
+pip install -U pip wheel && pip install -r requirements.txt -r /srv/sunbiz/sunbiz-agent/requirements.txt
+deactivate
+
+# SunBiz-Agent venv + setup wizard
+cd /srv/sunbiz/sunbiz-agent
+python3.12 -m venv .venv && . .venv/bin/activate
+pip install -U pip wheel && pip install -r requirements.txt
+python scripts/setup.py     # creates .env.agents.template, prints what's missing
 ```
 
-Wizard creates `.env.agents.template`, scaffolds local directories, and prints what's missing.
+## Step 3 — Populate `.env.agents`
 
-## Step 3 — Populate `.env.agents` from the template
+Copy `.env.agents.template` → `.env.agents` and fill in:
 
-Copy `.env.agents.template` to `.env.agents` and fill in:
+**Required (the doctor refuses green without these):**
 
-**Required (the doctor will refuse to declare green without these):**
-
-- `SUNBIZ_TWILIO_ACCOUNT_SID`
-- `SUNBIZ_TWILIO_AUTH_TOKEN`
-- `SUNBIZ_TWILIO_FROM_NUMBER`
-- `GMAIL_ADDRESS`
-- `GMAIL_APP_PASSWORD` (Gmail App Password, not the account password — see [Google App Passwords](https://myaccount.google.com/apppasswords))
-- `EMAIL_FROM_NAME` (display name on outbound)
-- `EMAIL_UNSUBSCRIBE_BASE_URL` (CASL footer base)
-- `JOTFORM_API_KEY`
-- `JOTFORM_FORM_ID`
+- `SUNBIZ_TWILIO_ACCOUNT_SID`, `SUNBIZ_TWILIO_AUTH_TOKEN`, `SUNBIZ_TWILIO_FROM_NUMBER`
+- `GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD` (App Password, not the account password — [Google App Passwords](https://myaccount.google.com/apppasswords))
+- `EMAIL_FROM_NAME`, `EMAIL_UNSUBSCRIBE_BASE_URL` (CASL footer base)
+- `JOTFORM_API_KEY`, `JOTFORM_FORM_ID`
 - `SUNBIZ_AGENT_HMAC_SECRET` (signs dashboard→VPS hosted requests)
 
-**Required for the CEO-Agent daemons (not checked by SunBiz-Agent's doctor; add manually):**
+**Required for the CEO-Agent daemons (not checked by SunBiz's doctor; add manually):**
 
 - `BRAVO_SUPABASE_URL`
-- `BRAVO_SUPABASE_SERVICE_ROLE_KEY` (the daemons connect as service-role to see all tenants)
-- `SUPABASE_ACCESS_TOKEN` (for the migration apply tool)
+- `BRAVO_SUPABASE_SERVICE_ROLE_KEY` (daemons connect as service-role to see all tenants)
+- `SUPABASE_ACCESS_TOKEN` (migration apply tool)
 - `BRAVO_FIELD_ENCRYPTION_KEY` (decrypts per-tenant API keys at rest)
 
-**Optional (Phase 2 / lead-gen):**
+**Production safety (keep until CC approves live outbound):**
 
-- `SUNBIZ_TELNYX_API_KEY`, `SUNBIZ_PLIVO_*` (failover SMS providers)
-- `GOOGLE_ADS_DEVELOPER_TOKEN`, `META_ACCESS_TOKEN`, `GEMINI_API_KEY` (Solara's ads stack)
+- `BRAVO_FORCE_DRY_RUN=1`
+- `EMAIL_REQUIRE_FROM_DOMAIN=sunbizfunding.com`
+- `CASL_FAIL_CLOSED=1` (Supabase suppressions authoritative; fail-closed if no source reachable)
 
-Copy the same file (or the same keys) into `~/business-empire-agent/.env.agents` — the CEO-Agent daemons read from there.
+**Optional (Phase 2 / lead-gen):** `SUNBIZ_TELNYX_API_KEY`, `SUNBIZ_PLIVO_*`,
+`GOOGLE_ADS_DEVELOPER_TOKEN`, `META_ACCESS_TOKEN`, `GEMINI_API_KEY`.
+
+The CEO-Agent daemons read **CEO's** `.env.agents`. The bootstrap symlinks
+`/srv/sunbiz/sunbiz-agent/.env.agents → /srv/sunbiz/ceo-agent/.env.agents` so the
+two stay identical; if you set them up by hand, copy the same keys into both.
 
 ## Step 4 — Doctor
 
 ```bash
-cd ~/SunBiz-Agent
-python scripts/doctor.py --json
+cd /srv/sunbiz/sunbiz-agent
+.venv/bin/python scripts/doctor.py --json
 ```
 
-Every check must be `status="ok"`. If any required check is `fail`, fix the env first — the daemons won't survive boot otherwise.
+Every check must be `status="ok"`. Fix the env first — the daemons won't survive boot otherwise.
 
-## Step 5 — Apply migrations
-
-Idempotent in numeric order:
+## Step 5 — Apply migrations (idempotent, numeric order)
 
 ```bash
-cd ~/SunBiz-Agent
-for f in 042 043 044 064 065 066 067 068; do
-  python scripts/apply_migration.py database/${f}_*.sql --supabase-project sunbiz
+cd /srv/sunbiz/sunbiz-agent
+for f in $(ls database/*.sql | sort); do
+  .venv/bin/python scripts/apply_migration.py "$f" --supabase-project sunbiz
 done
 ```
 
-If migration 066 raises an exception about the SunBiz tenant being unseeded — that's intentional. It means the SunBiz tenant row doesn't exist in your Supabase yet. Seed it (via the dashboard's onboarding flow or by running the SunBiz CRM bootstrap script) before re-applying.
+Applies every SunBiz migration in order through the current high-water mark
+(**077** as of 2026-06-02). If migration 066 raises "SunBiz tenant unseeded" —
+that's intentional; seed the tenant via the dashboard onboarding flow first, then
+re-apply. (CEO-Agent migrations, incl. the new **093**/**094**, apply against the
+shared project with `--supabase-project bravo`.)
 
-## Step 6 — Start PM2 (selective)
+## Step 6 — Start PM2 (TWO ecosystems, selective)
+
+The daemons live in two ecosystems — start each from its own repo:
 
 ```bash
-cd ~/business-empire-agent
 sudo npm install -g pm2
-pm2 start ecosystem.config.js --only event-router,sequence-runner,lender-response-classifier,claude-bridge-ping
+
+# CEO-Agent: event bus + the bridge ping/cron poller ONLY.
+cd /srv/sunbiz/ceo-agent
+pm2 start ecosystem.config.js --only event-router,claude-bridge-ping
+
+# SunBiz-Agent: the three sunbiz-* daemons (all Linux-safe; no telegram here).
+cd /srv/sunbiz/sunbiz-agent
+pm2 start ecosystem.config.js
+
 pm2 save
-sudo pm2 startup    # generates a systemd unit; copy-paste the command it prints
+sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u "$USER" --hp "$HOME"   # run the command it prints
 ```
 
-**Critical:** use `--only`, not the default `pm2 start ecosystem.config.js`. The default would start `bravo-telegram` on Linux too, which conflicts with Bravo's Windows bridge (single-bot-token invariant). The `--only` form makes the conflict impossible.
+**Critical:** from CEO-Agent use `--only event-router,claude-bridge-ping`, never the
+bare `pm2 start` — the default would start `bravo-telegram` on Linux, conflicting
+with Bravo's Windows bridge (single-bot-token invariant). `sequence-runner` /
+`lender-response-classifier` do NOT exist in CEO's ecosystem — they're
+`sunbiz-sequence-runner` / `sunbiz-lender-response-classifier` in SunBiz's, started
+from `/srv/sunbiz/sunbiz-agent` above. `pm2 save` AFTER starting both, or nothing
+resurrects on reboot.
 
 ## Step 7 — Pair the VPS to the dashboard
 
-Generate a bridge pairing token in the dashboard (Settings → Devices → Install bridge), drop it at `~/.oasis/bridge_token` on the VPS, then restart `claude-bridge-ping`:
+Generate a pairing token in the dashboard (Settings → Devices → Install bridge),
+drop it on the VPS, then restart the ping loop:
 
 ```bash
 mkdir -p ~/.oasis
@@ -119,59 +164,62 @@ chmod 600 ~/.oasis/bridge_token
 pm2 restart claude-bridge-ping
 ```
 
-Within 60 seconds the dashboard's bridge-online indicator on the SunBiz `/automations` page should flip green.
+Within 60s the dashboard's bridge-online indicator on SunBiz `/automations` flips green.
 
 ## Step 8 — Smoke test
 
 ```bash
-# 8a. Confirm PM2 is steady (no restart loops).
-pm2 status
-pm2 logs --lines 50
+# 8a. PM2 steady (no restart loops).
+pm2 status && pm2 logs --lines 50
 
-# 8b. Confirm the event router is consuming events.
-tail -n 20 ~/business-empire-agent/state/event_router.log
+# 8b. Event router consuming.
+tail -n 20 /srv/sunbiz/ceo-agent/state/event_router.log
 
-# 8c. Confirm the dashboard sees this VPS as the SunBiz bridge.
-#     In the dashboard: /t/sun/automations → top banner shows
-#     "Your computer is connected." with the green Cpu icon.
+# 8c. Dashboard sees this VPS: /t/sun/automations → "Your computer is connected."
 
-# 8d. Live test: queue one shop-out from the dashboard at
-#     /t/sun/shopping-out, then watch:
-tail -f ~/business-empire-agent/tmp/pm2-*.log
-#     You should see shop_out_sender claim the thread (status pending→sending→sent)
-#     within ~60s (the cron poller's tick interval).
+# 8d. Live test: queue one shop-out at /t/sun/shopping-out, then watch:
+tail -f /srv/sunbiz/ceo-agent/tmp/pm2-*.log
+#     shop_out_sender should claim the thread (pending→sending→sent) within ~60s.
 ```
 
-Watchpoint: leave `tail -f ~/business-empire-agent/state/event_router.log` running for 10 minutes after first boot. No crash loops, no Postgres connection-refused storms, no Gmail auth retries past the first one.
+Watchpoint: leave `tail -f /srv/sunbiz/ceo-agent/state/event_router.log` running for
+10 minutes after first boot. No crash loops, no Postgres connection-refused storms,
+no Gmail auth retries past the first.
 
 ---
 
 ## Daily ops
 
 - Status: `pm2 status` + `pm2 logs --lines 50`
-- Restart one: `pm2 restart sequence-runner`
+- Restart one: `pm2 restart sunbiz-sequence-runner`
 - Restart all: `pm2 restart all`
 - Pull updates:
   ```bash
-  cd ~/business-empire-agent && git pull && pm2 restart all
-  cd ~/SunBiz-Agent && git pull
+  cd /srv/sunbiz/ceo-agent    && git pull && pm2 restart all
+  cd /srv/sunbiz/sunbiz-agent && git pull
   # Re-apply any new database/*.sql via Step 5's loop
   ```
 
 ## Known follow-ups (not blocking deploy)
 
-1. **Doctor coverage gap** — `scripts/doctor.py` checks SunBiz-Agent's env keys but doesn't validate the CEO-Agent daemon keys (`BRAVO_SUPABASE_URL`, `BRAVO_FIELD_ENCRYPTION_KEY`). Add to doctor in a future pass.
-2. **`shop_out_sender` is cron-driven, not a PM2 daemon** — fires through `claude-bridge-ping`'s tenant cron poller using manifest key `shop_out_sender_loop`. If you'd rather have it as a long-running daemon, add an entry to `ecosystem.config.js` (interval 60s is sensible). The cron-driven path is the current default per the bridge-side execution model.
-3. **`send_gateway.py` lives canonically in CEO-Agent, not here** — it's an empire-wide chokepoint (oasis + sunbiz brands + CASL + cooldown + daily-cap). This repo stores SunBiz-specific logic only. Don't fork.
-4. **`bravo-telegram` is intentionally not on the VPS** — Telegram routing stays single-host on Bravo's Windows workstation. If CC ever wants the VPS to own Telegram, follow the handoff protocol in `ecosystem.config.js` (stop Windows bridge first, then start the VPS one).
+1. **Doctor coverage gap** — `scripts/doctor.py` checks SunBiz's env keys but not the
+   CEO-Agent daemon keys (`BRAVO_SUPABASE_URL`, `BRAVO_FIELD_ENCRYPTION_KEY`). Add later.
+2. **`shop_out_sender` is cron-driven, not a PM2 daemon** — fires via `claude-bridge-ping`'s
+   poller using manifest key `shop_out_sender_loop`. Seed it + `underwriting_orchestrator`
+   in `cron_registry.py` (only `follow_up_generator`/`daily_plan_generator`/`renewal_reminder`
+   ship seeded today).
+3. **`send_gateway.py` lives canonically in CEO-Agent** — empire-wide chokepoint. Don't fork.
+4. **`bravo-telegram` is intentionally not on the VPS** — Telegram stays single-host on
+   Bravo's Windows workstation.
 
 ## When something breaks
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `pm2 logs` shows `Postgres connection refused` | Wrong Supabase URL or service-role key | Re-check `.env.agents`; the service-role key changes when CC rotates it |
-| Migration 066 throws `tenant not found` | SunBiz tenant row missing in Supabase | Seed it via dashboard onboarding before re-running |
-| Bridge-online indicator stays red | Pairing token not loaded or `claude-bridge-ping` not running | Check `cat ~/.oasis/bridge_token` exists; `pm2 restart claude-bridge-ping` |
-| Shop-out threads stuck at `pending` | `shop_out_sender_loop` cron not seeded or `claude-bridge-ping` not polling | Verify in dashboard /automations that there's a cron job with action_type=script and manifest_key=`shop_out_sender_loop` |
-| `lender-response-classifier` 401s on Gmail | App Password expired or 2FA settings changed | Regenerate at [Google App Passwords](https://myaccount.google.com/apppasswords), update `GMAIL_APP_PASSWORD`, `pm2 restart lender-response-classifier` |
-| Daemon crash-loops with `ModuleNotFoundError` | venv not activated for PM2 | PM2 entries specify the interpreter explicitly; check `which python3.12` matches `~/business-empire-agent/.venv/bin/python`. If your VPS uses a different layout, edit `ecosystem.config.js`'s `PYTHON` constant for the Linux branch |
+| Migration 066 throws `tenant not found` | SunBiz tenant row missing in Supabase | Seed via dashboard onboarding before re-running |
+| Bridge-online indicator stays red | Pairing token not loaded or `claude-bridge-ping` down | `cat ~/.oasis/bridge_token` exists; `pm2 restart claude-bridge-ping` |
+| Shop-out threads stuck at `pending` | `shop_out_sender_loop` cron not seeded or poller down | Verify in /automations there's a cron job with action_type=script, manifest_key=`shop_out_sender_loop` |
+| `sunbiz-lender-response-classifier` 401s on Gmail | App Password expired / 2FA changed | Regenerate at [Google App Passwords](https://myaccount.google.com/apppasswords), update `GMAIL_APP_PASSWORD`, `pm2 restart sunbiz-lender-response-classifier` |
+| Daemon crash-loops with `ModuleNotFoundError` | CEO `.venv` missing SunBiz deps | Re-run Step 2's CEO-venv install (both requirements). PM2 interpreter is `/srv/sunbiz/ceo-agent/.venv/bin/python` |
+| `pm2 start --only sequence-runner` starts nothing | Wrong name/repo | Those are `sunbiz-*` in SunBiz's ecosystem — start from `/srv/sunbiz/sunbiz-agent` |
