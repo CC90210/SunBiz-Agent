@@ -56,9 +56,12 @@ Copy `.env.agents.template` to `.env.agents` and fill in:
 - `GMAIL_APP_PASSWORD` (Gmail App Password, not the account password — see [Google App Passwords](https://myaccount.google.com/apppasswords))
 - `EMAIL_FROM_NAME` (display name on outbound)
 - `EMAIL_UNSUBSCRIBE_BASE_URL` (CASL footer base)
-- `JOTFORM_API_KEY`
-- `JOTFORM_FORM_ID`
 - `SUNBIZ_AGENT_HMAC_SECRET` (signs dashboard→VPS hosted requests)
+- `BRIDGE_BEARER_TOKEN` (matches Vercel env value; bridge auth)
+- `ANTHROPIC_API_KEY` (backend automation paths that call Claude server-side)
+
+(JotForm removed 2026-06-06 — SunBiz intake is the dashboard's native
+`/forms` designer + `/f/<tenant>/<form>/<lead_token>` public flow.)
 
 **Required for the CEO-Agent daemons (not checked by SunBiz-Agent's doctor; add manually):**
 
