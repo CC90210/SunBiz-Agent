@@ -102,14 +102,15 @@ def _append_webhook_log(payload: dict[str, Any], request: Request) -> None:
 
 
 def _emit_lead_event(payload: dict[str, Any]) -> None:
-    bravo_scripts = Path("C:/Users/User/Business-Empire-Agent/scripts")
-    if not bravo_scripts.exists():
-        return
     try:
-        import sys
-
-        sys.path.insert(0, str(bravo_scripts))
-        from event_bus import publish  # type: ignore
+        # Cross-platform: resolve the CEO-Agent runtime via the shared
+        # bootstrap (BRAVO_AGENT_ROOT / ~/CEO-Agent / Windows fallback)
+        # instead of a hardcoded Windows path, so the V6 publish path is
+        # live on the Linux VPS too. Best-effort — never breaks ingestion.
+        from _bravo_bootstrap import bootstrap_bravo_path
+        if bootstrap_bravo_path() is None:
+            return
+        from core.event_bus import publish  # type: ignore
 
         submission_id = (
             payload.get("submission_id")

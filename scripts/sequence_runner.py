@@ -684,7 +684,20 @@ def _send_step(sb, state_row: dict, sequence: dict) -> dict:
         # CASL opt-out / hard reject. The retry button isn't going to
         # un-opt the lead out. Cancel cleanly.
         return {"outcome": "suppressed", "detail": f"suppressed: {reason}"}
-    # dry_run / error / unknown — treat as transient.
+    if status == "dry_run":
+        # BRAVO_FORCE_DRY_RUN killswitch (or a caller-passed dry_run): nothing
+        # was transmitted. Do NOT burn the retry budget on the killswitch —
+        # route through the cooldown path (which reschedules WITHOUT
+        # incrementing attempt_count and releases the claim) so the step
+        # resumes cleanly the moment live sends are enabled, instead of
+        # chewing through MAX_ATTEMPTS and permanently failing a healthy lead.
+        retry_at = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
+        return {
+            "outcome": "cooldown",
+            "detail": f"dry_run: {reason or 'killswitch engaged'}",
+            "retry_after_iso": retry_at,
+        }
+    # error / unknown — treat as transient.
     return {"outcome": "error", "detail": f"{status}: {reason}"}
 
 
