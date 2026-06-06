@@ -48,7 +48,7 @@ Fix obvious issues without asking. Answer in 1-5 sentences, then act. Never tell
 - **Project:** SunBiz-Agent — funding-shop operations hub for SunBiz Funding
 - **Operator:** Ezra (Submissions@sunbizfunding.com). Team: Jordan, Ethan, Emily.
 - **Domain:** MCA funding — lead intake → application → lender shop-out → offer aggregation → funded deals → renewals.
-- **Stack:** Python, FastAPI, Twilio (SMS), Gmail SMTP, JotForm, Supabase. Platform: Windows 11, bash.
+- **Stack:** Python, FastAPI, Twilio (SMS), Gmail SMTP, Supabase. Intake forms are the dashboard's native `/forms` designer + `/f/<tenant>/<form>/<lead_token>` public flow (NOT JotForm — removed 2026-06-06). Platform: Windows 11, bash.
 - **V6 substrate parent:** CEO-Agent at `C:\Users\User\Business-Empire-Agent`. Solara consumes V6 primitives (state DB, retrieval, guards, event bus) via path lookups to BEA. See `brain/CAPABILITIES.md`.
 - **Repo policy:** SunBiz-Agent is the AUTHORITATIVE storage for SunBiz-specific business logic (commit 7d34f2e, 2026-05-15). PM2 runtime lives in CEO-Agent. Edits to SunBiz business logic happen HERE first.
 - Identity and values: `brain/SOUL.md` | Ezra's profile: `brain/USER.md` | Client profile: `brain/CLIENT.md`
@@ -86,7 +86,6 @@ CLI tools in `scripts/` are the PRIMARY execution layer — they read `.env.agen
 | Quick underwriting / pre-screen a deal | `python scripts/underwriting_orchestrator.py score --deal-id <id> --json` |
 | BATCH email campaign (drips/blasts ONLY, never one-off) | `python scripts/email_blast.py` |
 | SMS engine status (batch) | `python scripts/sms_engine.py status` |
-| JotForm leads | `python scripts/jotform_tracker.py` |
 | Supabase queries | `python scripts/supabase_tool.py` |
 
 ### RULE 3: CREDENTIALS AND SECURITY (CRITICAL)
@@ -95,7 +94,7 @@ All credentials in `.env.agents`. NEVER hardcode secrets. See `skills/security-p
 
 `.env.agents` is NOT LLM-readable. Use CLI wrappers that load via `scripts/lib/secret_loader.py` — they return only sanitized JSON. If you see a credential in context, STOP and tell Ezra the guard is misconfigured.
 
-Production-critical keys: `SUNBIZ_TWILIO_ACCOUNT_SID`, `SUNBIZ_TWILIO_AUTH_TOKEN`, `SUNBIZ_TWILIO_FROM_NUMBER`, `GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD`, `JOTFORM_API_KEY`, `JOTFORM_FORM_ID`, `SUNBIZ_AGENT_HMAC_SECRET`.
+Production-critical keys: `SUNBIZ_TWILIO_ACCOUNT_SID`, `SUNBIZ_TWILIO_AUTH_TOKEN`, `SUNBIZ_TWILIO_FROM_NUMBER`, `GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD`, `SUNBIZ_AGENT_HMAC_SECRET`, `BRIDGE_BEARER_TOKEN`, `ANTHROPIC_API_KEY`. (JotForm keys removed 2026-06-06.)
 
 ### RULE 4: Cross-file sync
 

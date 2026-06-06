@@ -52,7 +52,7 @@ State files are per-intent reads — the router decides when. Don't auto-load `S
 - **Operator:** Ezra (Submissions@sunbizfunding.com). Team: Jordan, Ethan, Emily.
 - **Domain:** MCA funding — lead intake → application → lender shop-out → offer aggregation → funded deals → renewals.
 - **North Star:** TODO — confirm with Ezra.
-- **Stack:** Python, FastAPI, Twilio (SMS), Gmail SMTP, JotForm, Supabase. Platform: Windows 11, bash.
+- **Stack:** Python, FastAPI, Twilio (SMS), Gmail SMTP, Supabase. Intake forms are the dashboard's native `/forms` designer + `/f/<tenant>/<form>/<lead_token>` public flow (NOT JotForm — removed 2026-06-06). Platform: Windows 11, bash.
 - **Repo policy:** SunBiz-Agent is AUTHORITATIVE for SunBiz business logic (commit 7d34f2e, 2026-05-15). V6 substrate consumed from CEO-Agent.
 
 ---
@@ -97,7 +97,6 @@ For anything Ezra asks about recent activity: read `memory/SESSION_LOG.md` FIRST
 | Quick underwriting / pre-screen a deal | `python scripts/underwriting_orchestrator.py score --deal-id <id> --json` |
 | BATCH email campaign (drips/blasts ONLY, never one-off) | `python scripts/email_blast.py` |
 | SMS engine status (batch) | `python scripts/sms_engine.py status` |
-| JotForm leads | `python scripts/jotform_tracker.py` |
 | Supabase query | `python scripts/supabase_tool.py` |
 | Fetch URL (auto-escalating) | `python scripts/research_fetch.py <url> --json` |
 
@@ -107,7 +106,7 @@ Full routing: `brain/QUICK_REFERENCE.md`.
 
 All credentials live in `.env.agents` (gitignored). Never hardcode secrets. Never commit `.env*` files. Validate inputs at system boundaries. Enforce RLS on Supabase. Sandbox risky scripts in `tmp/`.
 
-Production-critical keys: `SUNBIZ_TWILIO_ACCOUNT_SID`, `SUNBIZ_TWILIO_AUTH_TOKEN`, `SUNBIZ_TWILIO_FROM_NUMBER`, `GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD`, `JOTFORM_API_KEY`, `JOTFORM_FORM_ID`, `SUNBIZ_AGENT_HMAC_SECRET`.
+Production-critical keys: `SUNBIZ_TWILIO_ACCOUNT_SID`, `SUNBIZ_TWILIO_AUTH_TOKEN`, `SUNBIZ_TWILIO_FROM_NUMBER`, `GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD`, `SUNBIZ_AGENT_HMAC_SECRET`, `BRIDGE_BEARER_TOKEN`, `ANTHROPIC_API_KEY`. (JotForm keys removed 2026-06-06.)
 
 ### RULE 4: CROSS-FILE SYNC
 
