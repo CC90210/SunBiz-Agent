@@ -51,7 +51,6 @@ You are the primary IDE agent with the broadest tool access (MCP servers + all P
 | API server | `python scripts/api_server.py` |
 | SMS | `python scripts/sms_engine.py` |
 | Email outreach | `python scripts/email_blast.py` |
-| JotForm leads | `python scripts/jotform_tracker.py` |
 | Supabase | `python scripts/supabase_tool.py` |
 | Fetch URL (auto-escalating) | `python scripts/research_fetch.py <url>` |
 

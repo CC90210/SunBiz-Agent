@@ -45,7 +45,6 @@ Fast queries, diagnostics, data retrieval. You are the speed layer — answer qu
 | Health check | `python scripts/doctor.py` |
 | SMS | `python scripts/sms_engine.py` |
 | Email | `python scripts/email_blast.py` |
-| JotForm leads | `python scripts/jotform_tracker.py` |
 | Supabase | `python scripts/supabase_tool.py` |
 
 **RULE 3:** All credentials in `.env.agents`. Never hardcoded. If an MCP tool fails, report in one sentence and STOP — no curl fallbacks, no workaround scripts.
