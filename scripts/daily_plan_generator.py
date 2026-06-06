@@ -410,7 +410,7 @@ def _gen_new_offer(sb, tenant_id: str, today: str) -> int:
     try:
         threads = (
             sb.table("application_lender_threads")
-            .select("id, application_id, lender_id, data")
+            .select("id, application_id, lender_id, last_response_summary")
             .eq("tenant_id", tenant_id)
             .eq("status", "offer_received")
             .execute()
@@ -438,14 +438,16 @@ def _gen_new_offer(sb, tenant_id: str, today: str) -> int:
         thread_id = thread.get("id", "")
         if thread_id in existing_ids:
             continue
-        thread_data = thread.get("data") or {}
         if _upsert_item(
             sb, tenant_id, today, thread_id, "new_offer",
             reason="Lender offer received — review and respond",  # Codex 2026-05-25 P0 finding
             metadata={
                 "application_id": thread.get("application_id"),
                 "lender_id": thread.get("lender_id"),
-                "offer_summary": thread_data.get("offer_summary"),
+                # 095 finalization: application_lender_threads has no `data` JSONB
+                # column (schema uses discrete columns); pull the summary from
+                # last_response_summary instead of the non-existent data.offer_summary.
+                "offer_summary": thread.get("last_response_summary"),
             },
         ):
             inserted += 1
