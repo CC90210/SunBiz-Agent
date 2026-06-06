@@ -5,8 +5,12 @@ Checks the repo-local production surface Ezra would rely on:
 - environment file + required keys
 - core dependencies
 - SMS engine readiness
-- JotForm and Gmail configuration
+- Gmail configuration
 - hosted API security configuration
+
+NOTE 2026-06-06: JotForm checks were removed — SunBiz uses the
+dashboard's native /forms + /f/<tenant>/<form>/<lead_token> flow for
+intake. There is no third-party form vendor in the SunBiz pipeline.
 
 Usage:
     python scripts/doctor.py
@@ -42,13 +46,11 @@ FRIENDLY_CHECK_NAMES = {
     "repo_surface": "Runtime files",
     "sms_phase1_env": "Text Torrent credentials",
     "gmail_env": "Email credentials",
-    "jotform_env": "JotForm credentials",
     "api_security_env": "Hosted API signing secret",
     "sms_phase2_failover_env": "Phase 2 SMS failover",
     "leadgen_env": "Optional lead-gen keys",
     "sms_engine": "SMS transport",
     "gmail_live": "Live Gmail connection",
-    "jotform_live": "Live JotForm connection",
 }
 
 
@@ -135,42 +137,9 @@ def run_gmail_login(env: dict[str, str]) -> Check:
         )
 
 
-def run_jotform_probe(env: dict[str, str]) -> Check:
-    api_key = resolve_env("JOTFORM_API_KEY", env)
-    form_id = resolve_env("JOTFORM_FORM_ID", env)
-    if not (key_is_configured(api_key) and key_is_configured(form_id)):
-        return Check(
-            name="jotform_live",
-            status="fail",
-            detail="JotForm credentials are not fully configured",
-            required=True,
-        )
-    try:
-        from jotform_tracker import JotFormTracker
-
-        tracker = JotFormTracker()
-        info = tracker.get_form_info()
-        title = info.get("title", "(unknown form)")
-        return Check(
-            name="jotform_live",
-            status="ok",
-            detail=f"connected to form '{title}'",
-            required=True,
-        )
-    except SystemExit as exc:
-        return Check(
-            name="jotform_live",
-            status="fail",
-            detail=f"tracker exited early: {exc}",
-            required=True,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return Check(
-            name="jotform_live",
-            status="fail",
-            detail=f"JotForm probe failed: {str(exc)[:200]}",
-            required=True,
-        )
+# run_jotform_probe removed 2026-06-06 — SunBiz no longer uses JotForm.
+# Form intake is the dashboard's native /forms designer + /f/<tenant>/<form>
+# public flow. See lib/forms-render/ in oasis-command-center.
 
 
 def build_report(*, include_live_checks: bool = False) -> dict:
@@ -207,7 +176,6 @@ def build_report(*, include_live_checks: bool = False) -> dict:
         PROJECT_ROOT / "dashboard" / "tenant.manifest.json",
         PROJECT_ROOT / "scripts" / "sms_engine.py",
         PROJECT_ROOT / "scripts" / "email_blast.py",
-        PROJECT_ROOT / "scripts" / "jotform_tracker.py",
         PROJECT_ROOT / "scripts" / "api_server.py",
     ]
     missing_paths = [str(path.relative_to(PROJECT_ROOT)) for path in required_paths if not path.exists()]
@@ -266,14 +234,8 @@ def build_report(*, include_live_checks: bool = False) -> dict:
             required=True,
         )
     )
-    checks.append(
-        check_key_group(
-            "jotform_env",
-            ("JOTFORM_API_KEY", "JOTFORM_FORM_ID"),
-            env,
-            required=True,
-        )
-    )
+    # jotform_env check removed 2026-06-06 — SunBiz uses native /forms,
+    # no JotForm credentials required.
     checks.append(
         check_key_group(
             "api_security_env",
@@ -339,7 +301,6 @@ def build_report(*, include_live_checks: bool = False) -> dict:
 
     if include_live_checks:
         checks.append(run_gmail_login(env))
-        checks.append(run_jotform_probe(env))
 
     required_failures = [check for check in checks if check.required and check.status == "fail"]
     warnings = [check for check in checks if check.status == "warn"]
@@ -390,7 +351,7 @@ def print_human(report: dict) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Sun Biz Agent production doctor")
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
-    parser.add_argument("--deep", action="store_true", help="Run live JotForm and Gmail connectivity checks")
+    parser.add_argument("--deep", action="store_true", help="Run live Gmail connectivity check")
     args = parser.parse_args(argv)
 
     report = build_report(include_live_checks=args.deep)
