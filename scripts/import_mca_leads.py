@@ -54,6 +54,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -190,16 +191,43 @@ def _read_pdf(path: Path) -> list[dict[str, Any]]:
                         continue
                     group_rows[matched_group].append(list(row))
 
-    # Join the four group row-streams by index. Longest stream wins.
-    max_len = max((len(rows) for rows in group_rows.values()), default=0)
+    # Codex audit finding #2 (critical PII safety): row alignment by index
+    # is unsafe when pdfplumber misses or duplicates a row in any one
+    # group — every subsequent row gets misaligned and SSN/EIN/funder
+    # data attaches to the WRONG company silently. Validate row counts
+    # across groups; refuse the import unless every group has the same
+    # count. Operator can fall back to xlsx/CSV (preferred path).
+    populated_counts = {
+        name: len(rows) for name, rows in group_rows.items() if rows
+    }
+    if not populated_counts:
+        return []
+    counts = list(populated_counts.values())
+    if len(set(counts)) > 1:
+        raise RuntimeError(
+            "PDF parse refused — row counts disagree across page-groups: "
+            f"{populated_counts}. Aligning by index would attach the wrong "
+            "PII to leads. Convert the source to xlsx or CSV (xlsx -> "
+            "Save As -> CSV in Excel) and re-run with --source-path <file>.csv."
+        )
+    expected_count = counts[0]
+    # Also refuse if any expected group is entirely missing (the PDF was
+    # truncated or pdfplumber failed on a page-group).
+    expected_groups = {name for name, _sig in group_signatures}
+    missing = expected_groups - set(populated_counts.keys())
+    if missing:
+        raise RuntimeError(
+            f"PDF parse refused — missing column groups: {sorted(missing)}. "
+            "Source PDF may be truncated. Convert to xlsx/CSV and re-run."
+        )
+
+    # All groups have identical row counts — alignment is safe to proceed.
     out: list[dict[str, Any]] = []
-    for i in range(max_len):
+    for i in range(expected_count):
         merged: dict[str, Any] = {}
         for group_name, _sig in group_signatures:
             headers = group_headers.get(group_name) or []
             rows = group_rows.get(group_name) or []
-            if i >= len(rows):
-                continue
             row_values = rows[i]
             for col_idx, val in enumerate(row_values):
                 if col_idx >= len(headers):
@@ -207,8 +235,6 @@ def _read_pdf(path: Path) -> list[dict[str, Any]]:
                 key = headers[col_idx]
                 if not key:
                     continue
-                # Dedup: same header across groups (e.g. NumberType repeats) —
-                # suffix later occurrences so we don't overwrite
                 final_key = key
                 if final_key in merged:
                     suffix = 2
@@ -341,6 +367,52 @@ def normalize_email(v: Any) -> Optional[str]:
     return s
 
 
+# US state → IANA timezone. Codex audit finding #8: send_gateway's
+# _check_send_window falls back to America/Toronto when lead.data.timezone
+# is missing; the importer never set timezone, so a California merchant
+# would get an 8am Toronto SMS at 5am PT. Setting timezone at import
+# eliminates the gap. States with mixed time zones map to the largest
+# population zone (FL/TX/ID/IN/KS/KY/MI/ND/NE/OR/SD/TN — covered below).
+STATE_TIMEZONE: dict[str, str] = {
+    "AL": "America/Chicago",     "AK": "America/Anchorage",
+    "AZ": "America/Phoenix",     "AR": "America/Chicago",
+    "CA": "America/Los_Angeles", "CO": "America/Denver",
+    "CT": "America/New_York",    "DC": "America/New_York",
+    "DE": "America/New_York",    "FL": "America/New_York",
+    "GA": "America/New_York",    "HI": "Pacific/Honolulu",
+    "IA": "America/Chicago",     "ID": "America/Boise",
+    "IL": "America/Chicago",     "IN": "America/Indiana/Indianapolis",
+    "KS": "America/Chicago",     "KY": "America/New_York",
+    "LA": "America/Chicago",     "MA": "America/New_York",
+    "MD": "America/New_York",    "ME": "America/New_York",
+    "MI": "America/Detroit",     "MN": "America/Chicago",
+    "MO": "America/Chicago",     "MS": "America/Chicago",
+    "MT": "America/Denver",      "NC": "America/New_York",
+    "ND": "America/Chicago",     "NE": "America/Chicago",
+    "NH": "America/New_York",    "NJ": "America/New_York",
+    "NM": "America/Denver",      "NV": "America/Los_Angeles",
+    "NY": "America/New_York",    "OH": "America/New_York",
+    "OK": "America/Chicago",     "OR": "America/Los_Angeles",
+    "PA": "America/New_York",    "RI": "America/New_York",
+    "SC": "America/New_York",    "SD": "America/Chicago",
+    "TN": "America/Chicago",     "TX": "America/Chicago",
+    "UT": "America/Denver",      "VA": "America/New_York",
+    "VT": "America/New_York",    "WA": "America/Los_Angeles",
+    "WI": "America/Chicago",     "WV": "America/New_York",
+    "WY": "America/Denver",
+}
+
+
+def derive_timezone(state: Any) -> Optional[str]:
+    """Map a US state code to IANA timezone for TCPA-compliant SMS
+    windows. Returns None for non-US / unknown so the send-window gate
+    can fail-closed for SMS instead of assuming America/Toronto."""
+    if state in (None, ""):
+        return None
+    s = str(state).strip().upper()[:2]
+    return STATE_TIMEZONE.get(s)
+
+
 def parse_positions(v: Any) -> Optional[int]:
     """Map Adon's 'Positions' column ('1st', '2nd', '4th or more') into
     an integer 1-4."""
@@ -399,18 +471,55 @@ def parse_current_funders(v: Any) -> tuple[list[dict[str, Any]], str]:
     return out, raw
 
 
+def _ssn_pepper() -> Optional[str]:
+    """Read the SSN HMAC pepper from .env.agents. When missing, we
+    refuse to persist any SSN-derived hash (last4 alone is sufficient
+    for display; dedup against historical leads must use email/phone/
+    business+state instead until the pepper is configured)."""
+    try:
+        from lib.secret_loader import load_env  # type: ignore
+        env = load_env()
+    except Exception:
+        return None
+    p = (env.get("SSN_HMAC_PEPPER") or "").strip()
+    # Refuse short / empty peppers — without ≥32 bytes the HMAC is
+    # only marginally better than plain SHA-256 against a brute-force
+    # dictionary attack of the 10^9 SSN space.
+    return p if len(p) >= 32 else None
+
+
 def hash_ssn(ssn: Any) -> tuple[Optional[str], Optional[str]]:
-    """Return (last4, sha256_hash) so the importer never persists the
-    full SSN. Last 4 goes into data.ssn_last4 (visible). Hash goes into
-    data.ssn_hash (irreversible — used only for dedup matching against
-    future imports)."""
+    """Return (last4, hmac_hash). Codex audit finding #7: the previous
+    implementation stored raw SHA-256(ssn). SSNs have a 10^9 search
+    space — trivially reversible offline with a rainbow table or
+    GPU-accelerated brute force, so the SHA-256 hash was equivalent to
+    storing the SSN in cleartext.
+
+    New behavior:
+      - last4 is always returned (safe for display)
+      - hash is HMAC-SHA256(pepper, ssn) ONLY when SSN_HMAC_PEPPER is
+        configured (≥32 bytes) in .env.agents. Without a pepper, hash
+        is None — dedup falls back to email/phone/business+state.
+
+    Set the pepper once with `openssl rand -hex 32 >> .env.agents`
+    (with key SSN_HMAC_PEPPER=...) and never rotate without re-importing.
+    """
     if ssn in (None, ""):
         return None, None
     digits = re.sub(r"\D", "", str(ssn))
     if len(digits) != 9:
         return None, None
     last4 = digits[-4:]
-    h = hashlib.sha256(digits.encode("utf-8")).hexdigest()
+    pepper = _ssn_pepper()
+    if not pepper:
+        # No pepper configured — return last4 only; never persist
+        # an SSN-derived hash without proper salt.
+        return last4, None
+    h = hmac.new(
+        pepper.encode("utf-8"),
+        digits.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
     return last4, h
 
 
@@ -486,6 +595,13 @@ def map_row_to_lead_data(
         data["city"] = city
     if state:
         data["state"] = state
+        # Codex finding #8: stamp timezone so send_gateway's
+        # _check_send_window enforces local-time TCPA windows, not the
+        # Toronto fallback. Unknown states get no timezone (the gate
+        # will fail-closed for SMS).
+        tz = derive_timezone(state)
+        if tz:
+            data["timezone"] = tz
     if zip_code:
         data["zip"] = zip_code
     if ssn_last4:

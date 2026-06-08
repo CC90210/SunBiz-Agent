@@ -515,8 +515,13 @@ def score_inbound(sb, interaction: dict[str, Any]) -> Optional[dict[str, Any]]:
     """
     lead_id = interaction.get("lead_id")
     tenant_id = interaction.get("tenant_id")
+    # Codex finding #6: prefer the canonical `content` field; content_preview
+    # is a truncated mirror used for table display, subject is empty for SMS,
+    # body is the legacy alias. Reading content first means SMS replies and
+    # email bodies that landed only in `content` get scored correctly.
     body = (
-        interaction.get("content_preview")
+        interaction.get("content")
+        or interaction.get("content_preview")
         or interaction.get("body")
         or interaction.get("subject")
         or ""
@@ -639,30 +644,61 @@ def fetch_unscored_inbounds(
 ) -> list[dict[str, Any]]:
     """Return inbound merchant interactions from the last N hours that
     don't yet have metadata.sentiment populated. EXPLICITLY tenant-scoped
-    because the service-role client bypasses RLS — without this filter
-    Sentinel would score every tenant's inbounds (OASIS, PropFlow, etc.)
-    under SunBiz threshold logic. Tenant defaults to SunBiz."""
+    because the service-role client bypasses RLS.
+
+    Codex audit fixes 2026-06-08:
+      #5 — Unscored filter pushed to SQL (`metadata->sentiment IS NULL`).
+            OLD code applied limit(200) BEFORE filtering out already-scored
+            rows, so at >200 inbounds/window the daemon would re-fetch the
+            same scored rows forever and starve new replies for up to 48h.
+            New query asks the DB for unscored rows directly.
+      #6 — Select includes `content` (the canonical full body) instead of
+            relying on content_preview / subject only. SMS replies have no
+            subject and the inbound writer stores the full text in content.
+    """
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=lookback_hours)).isoformat()
     try:
         rows = (
             sb.table("lead_interactions")
             .select(
                 "id, tenant_id, lead_id, channel, direction, "
-                "content_preview, subject, metadata, created_at"
+                "content, content_preview, subject, metadata, created_at"
             )
             .eq("tenant_id", tenant_id)
             .eq("direction", "inbound")
             .gte("created_at", cutoff)
+            .filter("metadata->sentiment", "is", "null")
             .order("created_at", desc=False)
             .limit(200)
             .execute()
         )
     except Exception as exc:  # noqa: BLE001
-        _log(f"fetch_unscored: query failed: {exc}")
-        return []
+        # Fallback when the metadata->sentiment IS NULL filter isn't
+        # supported by the installed postgrest version: fetch a broader
+        # window + filter Python-side, but use a much larger limit so we
+        # don't starve. Logged so we know this path fired.
+        _log(f"fetch_unscored: SQL filter failed, falling back: {exc}")
+        try:
+            rows = (
+                sb.table("lead_interactions")
+                .select(
+                    "id, tenant_id, lead_id, channel, direction, "
+                    "content, content_preview, subject, metadata, created_at"
+                )
+                .eq("tenant_id", tenant_id)
+                .eq("direction", "inbound")
+                .gte("created_at", cutoff)
+                .order("created_at", desc=True)
+                .limit(2000)
+                .execute()
+            )
+        except Exception as exc2:  # noqa: BLE001
+            _log(f"fetch_unscored: fallback query also failed: {exc2}")
+            return []
     out: list[dict[str, Any]] = []
     for r in rows.data or []:
         meta = r.get("metadata") or {}
+        # Final Python-side guard — covers the fallback path
         if isinstance(meta, dict) and meta.get("sentiment"):
             continue
         out.append(r)
