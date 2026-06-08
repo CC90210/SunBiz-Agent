@@ -597,13 +597,24 @@ def _send_step(sb, state_row: dict, sequence: dict) -> dict:
         }
     step = steps[step_index]
     channel = step.get("channel")
-    body_template = step.get("body") or ""
+    # Step body resolution. Phase 2 templates (Adon brief, migration 078+)
+    # use `body_text` + `body_html` so send_gateway can ship a proper
+    # multipart/alternative MIME for CASL-compliant commercial email.
+    # Legacy templates use `body` (text-only). Fall through cleanly so
+    # both shapes work side-by-side until every template is migrated.
+    body_template = (
+        step.get("body_text")
+        or step.get("body")
+        or ""
+    )
+    body_html_template = step.get("body_html") or ""
     subject_template = step.get("subject") or ""
 
     ctx = _build_context(
         sb, state_row["tenant_id"], state_row["lead_id"], state_row.get("context_snapshot") or {}
     )
     body = render_template(body_template, ctx)
+    body_html = render_template(body_html_template, ctx) if body_html_template else None
     subject = render_template(subject_template, ctx) if subject_template else None
 
     lead = ctx.get("lead") or {}
@@ -622,6 +633,15 @@ def _send_step(sb, state_row: dict, sequence: dict) -> dict:
     # we send without CC rather than blocking the drip.
     cc_email = _resolve_assigned_rep_email(sb, lead.get("assigned_to"))
 
+    # Brand resolution by tenant. Adon brief 2026-06-08: SunBiz sends MUST
+    # use the SunBiz CASL footer (submissions@sunbizfunding.com address +
+    # SunBiz business_name), not the OASIS / Collingwood footer that the
+    # original hardcoded brand="oasis" implied. send_gateway's BRAND_IDENTITY
+    # registry already has the "sunbiz" entry — we just need to pick it
+    # based on the lead's tenant.
+    SUNBIZ_TENANT = "aa04fa1f-ad6a-44b0-ac4b-2ff5d1067110"
+    tenant_brand = "sunbiz" if state_row.get("tenant_id") == SUNBIZ_TENANT else "oasis"
+
     try:
         if channel == "email":
             res = send(
@@ -630,9 +650,10 @@ def _send_step(sb, state_row: dict, sequence: dict) -> dict:
                 cc_email=cc_email,
                 subject=subject or "(no subject)",
                 body_text=body,
+                body_html=body_html,
                 lead_id=state_row["lead_id"],
                 agent_source=f"sequence:{sequence.get('name') or sequence.get('id')}",
-                brand="oasis",
+                brand=tenant_brand,
                 intent="commercial",
             )
         elif channel == "sms":
@@ -653,7 +674,7 @@ def _send_step(sb, state_row: dict, sequence: dict) -> dict:
                 body_text=body,
                 lead_id=state_row["lead_id"],
                 agent_source=f"sequence:{sequence.get('name') or sequence.get('id')}",
-                brand="oasis",
+                brand=tenant_brand,
                 intent="commercial",
                 sms_provider=sms_provider,
                 metadata={"sms_provider": sms_provider} if sms_provider else None,
