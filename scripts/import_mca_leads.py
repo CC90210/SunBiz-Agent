@@ -606,7 +606,8 @@ def map_row_to_lead_data(
         data["zip"] = zip_code
     if ssn_last4:
         data["ssn_last4"] = ssn_last4
-        data["ssn_hash"] = ssn_hash
+        if ssn_hash:  # only when HMAC pepper is configured — don't store None
+            data["ssn_hash"] = ssn_hash
     if ein:
         data["ein"] = ein
     if dob:
