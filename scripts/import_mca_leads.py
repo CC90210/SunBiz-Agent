@@ -119,14 +119,106 @@ def _supabase():
 
 def read_rows(source_path: Path) -> list[dict[str, Any]]:
     """Read a spreadsheet into a list of dicts keyed by header name.
-    Handles xlsx via openpyxl and csv natively. Headers are normalized
-    to lowercase + stripped + underscored for stable mapping."""
+    Handles xlsx via openpyxl, csv natively, and PDF via pdfplumber.
+    Headers are normalized to lowercase + stripped + underscored for
+    stable mapping."""
     ext = source_path.suffix.lower()
     if ext == ".xlsx":
         return _read_xlsx(source_path)
     if ext == ".csv":
         return _read_csv(source_path)
+    if ext == ".pdf":
+        return _read_pdf(source_path)
     raise ValueError(f"unsupported file extension: {ext}")
+
+
+def _read_pdf(path: Path) -> list[dict[str, Any]]:
+    """Parse Adon's PDF-export of his MCA spreadsheet. The original xlsx
+    is too wide to render on one page, so Excel split the columns across
+    multiple page-groups (pages 1-15 = primary contact, 16-30 = phones +
+    address, 31-45 = SSN/EIN/birth/revenue, 46-60 = positions + funders).
+    Within each page-group, rows are aligned by index — row N on page 1
+    corresponds to row N on page 16 etc.
+
+    Strategy: extract tables from every page, group pages by their
+    header signature, then zip the row sequences across groups by index.
+    Falls back to raw text parsing when pdfplumber's table detection
+    can't find a grid.
+    """
+    try:
+        import pdfplumber
+    except ImportError as exc:
+        raise RuntimeError("pdfplumber not installed — `pip install pdfplumber`") from exc
+
+    # Each page-group has a distinct header signature. We detect which
+    # group a page belongs to by inspecting its first row.
+    group_signatures = [
+        ("primary_contact", {"phone_number", "first_name", "last_name", "company", "email"}),
+        ("phones_address",  {"phone2", "address"}),
+        ("ids_revenue",     {"city", "state", "zip", "ss", "ein", "revenue"}),
+        ("positions_funders", {"positions", "funding_company"}),
+    ]
+
+    group_rows: dict[str, list[list[Any]]] = {g[0]: [] for g in group_signatures}
+    group_headers: dict[str, list[str]] = {g[0]: [] for g in group_signatures}
+
+    with pdfplumber.open(str(path)) as pdf:
+        for page in pdf.pages:
+            tables = page.extract_tables() or []
+            for table in tables:
+                if not table or len(table) < 2:
+                    continue
+                headers_raw = table[0]
+                headers = [_norm_header(h) for h in headers_raw]
+                header_set = {h for h in headers if h}
+                # Match against known group signatures (at least 60% header overlap)
+                matched_group = None
+                best_overlap = 0
+                for group_name, sig in group_signatures:
+                    overlap = len(sig & header_set)
+                    if overlap > best_overlap and overlap >= len(sig) * 0.5:
+                        best_overlap = overlap
+                        matched_group = group_name
+                if not matched_group:
+                    continue
+                # First seen group headers win — later pages keep the same shape
+                if not group_headers[matched_group]:
+                    group_headers[matched_group] = headers
+                for row in table[1:]:
+                    # Skip totally-blank rows
+                    if not any((cell or "").strip() for cell in row if cell):
+                        continue
+                    group_rows[matched_group].append(list(row))
+
+    # Join the four group row-streams by index. Longest stream wins.
+    max_len = max((len(rows) for rows in group_rows.values()), default=0)
+    out: list[dict[str, Any]] = []
+    for i in range(max_len):
+        merged: dict[str, Any] = {}
+        for group_name, _sig in group_signatures:
+            headers = group_headers.get(group_name) or []
+            rows = group_rows.get(group_name) or []
+            if i >= len(rows):
+                continue
+            row_values = rows[i]
+            for col_idx, val in enumerate(row_values):
+                if col_idx >= len(headers):
+                    continue
+                key = headers[col_idx]
+                if not key:
+                    continue
+                # Dedup: same header across groups (e.g. NumberType repeats) —
+                # suffix later occurrences so we don't overwrite
+                final_key = key
+                if final_key in merged:
+                    suffix = 2
+                    while f"{key}_{suffix}" in merged:
+                        suffix += 1
+                    final_key = f"{key}_{suffix}"
+                merged[final_key] = val
+        if merged:
+            out.append(merged)
+    return out
 
 
 def _read_xlsx(path: Path) -> list[dict[str, Any]]:

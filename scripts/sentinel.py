@@ -79,9 +79,11 @@ BRAVO_ROOT = bootstrap_bravo_path()
 # ─────────────────────────────────────────────────────────────────────
 
 ROLLING_WINDOW = 5                # Number of inbounds the avg considers
-THRESHOLD_PAUSE = -30             # Avg below this -> 7d auto-pause
+THRESHOLD_PAUSE = -30             # Avg below this -> 7d auto-pause (red flag)
+THRESHOLD_YELLOW = 0              # Avg between -30 and this -> yellow flag (2x cadence)
 THRESHOLD_RECOVER = 20            # New score above this clears a pause
 PAUSE_DURATION_DAYS = 7
+YELLOW_FLAG_DAYS = 14             # Yellow flag stays sticky for this long after avg recovers
 INBOUND_LOOKBACK_HOURS = 48       # Only score inbounds from last 48h on each pass
 DEFAULT_INTERVAL_SECONDS = 60
 
@@ -571,9 +573,17 @@ def score_inbound(sb, interaction: dict[str, Any]) -> Optional[dict[str, Any]]:
     }
     _update_lead_data(sb, tenant_id, lead_id, patch)
 
-    # 3. Pause / recover logic
+    # 3. Pause / yellow-flag / recover logic per Adon §4.5 + §7
+    # Three tiers:
+    #   avg <= -30           : red flag — 7d hard pause + Telegram alert
+    #   -30 < avg <= 0       : yellow flag — 2x inter_touch_gap (180min)
+    #   0 < avg < +20        : normal cadence, no flag changes
+    #   avg >= +20           : recovery — clear any active flags
     paused_applied = False
     pause_cleared = False
+    yellow_set = False
+    yellow_cleared = False
+
     if avg is not None and avg <= THRESHOLD_PAUSE:
         paused_applied = _apply_pause(
             sb, tenant_id, lead_id, avg, result["score"],
@@ -581,16 +591,44 @@ def score_inbound(sb, interaction: dict[str, Any]) -> Optional[dict[str, Any]]:
         )
         if paused_applied:
             _log(
-                f"score_inbound: PAUSED lead={lead_id} avg={avg:.1f} "
+                f"score_inbound: RED-PAUSED lead={lead_id} avg={avg:.1f} "
                 f"latest={result['score']}"
+            )
+    elif avg is not None and avg <= THRESHOLD_YELLOW:
+        # Yellow zone — double the inter-touch gap so sequence_runner +
+        # send_gateway naturally slow down without a hard pause.
+        existing_yellow = lead_data.get("sentinel_yellow_until")
+        yellow_until = (
+            datetime.now(timezone.utc) + timedelta(days=YELLOW_FLAG_DAYS)
+        ).isoformat()
+        _update_lead_data(sb, tenant_id, lead_id, {
+            "sentinel_yellow_flag": True,
+            "sentinel_yellow_until": yellow_until,
+            "sentinel_yellow_avg": avg,
+        })
+        if not existing_yellow:
+            yellow_set = True
+            _log(
+                f"score_inbound: YELLOW-FLAGGED lead={lead_id} avg={avg:.1f} "
+                f"latest={result['score']} (2x cadence for 14d)"
             )
     elif result["score"] >= THRESHOLD_RECOVER:
         pause_cleared = _clear_pause(sb, tenant_id, lead_id, result["score"])
-        if pause_cleared:
+        # Also clear yellow flag on recovery
+        if lead_data.get("sentinel_yellow_flag"):
+            _update_lead_data(sb, tenant_id, lead_id, {
+                "sentinel_yellow_flag": False,
+                "sentinel_yellow_until": None,
+                "sentinel_yellow_cleared_at": datetime.now(timezone.utc).isoformat(),
+            })
+            yellow_cleared = True
+        if pause_cleared or yellow_cleared:
             _log(f"score_inbound: RECOVERED lead={lead_id} score={result['score']}")
 
     result["paused_applied"] = paused_applied
     result["pause_cleared"] = pause_cleared
+    result["yellow_set"] = yellow_set
+    result["yellow_cleared"] = yellow_cleared
     return result
 
 
