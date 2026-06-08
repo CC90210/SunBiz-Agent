@@ -28,6 +28,9 @@ anthropic>=0.25.0
 pdfplumber>=0.10.0
 PyMuPDF>=1.24.0          # fitz — faster page rendering for bank statement PDFs
 
+# --- Spreadsheet parsing (import_mca_leads — Adon's xlsx handoff) ---
+openpyxl>=3.1.0
+
 # --- Image generation (imagen_generate, generate_logo — legacy ad tooling) ---
 google-genai>=1.0.0
 Pillow>=10.0.0

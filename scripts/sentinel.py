@@ -85,6 +85,18 @@ PAUSE_DURATION_DAYS = 7
 INBOUND_LOOKBACK_HOURS = 48       # Only score inbounds from last 48h on each pass
 DEFAULT_INTERVAL_SECONDS = 60
 
+# Phase 1 scope: Sentinel runs against the SunBiz tenant only. The
+# service-role Supabase client bypasses RLS, so without an explicit
+# tenant filter the daemon would score every tenant's inbounds (OASIS,
+# future PropFlow, etc.) under the same threshold logic. That's not the
+# intended behavior — Adon's brief is SunBiz-specific, and CC explicitly
+# wants per-tenant opt-in for cross-cutting automation.
+#
+# To enable Sentinel for another tenant later: run a second pm2 daemon
+# with --tenant-id <other_uuid>, or change SENTINEL_TENANT_ID via env
+# override at start (the CLI honors --tenant-id too).
+SUNBIZ_TENANT_ID = "aa04fa1f-ad6a-44b0-ac4b-2ff5d1067110"
+
 # Profanity / hostility tokens — case-insensitive substring match. The
 # LLM does the heavy lifting; this is a deterministic floor for the
 # obvious cases so we never miss them on an LLM hiccup.
@@ -492,7 +504,13 @@ def _clear_pause(sb, tenant_id: str, lead_id: str, recover_score: int) -> bool:
 
 def score_inbound(sb, interaction: dict[str, Any]) -> Optional[dict[str, Any]]:
     """Score one inbound interaction. Returns the scoring result on
-    success, None on skip (already-scored, no lead, no body)."""
+    success, None on skip (already-scored, no lead, no body).
+
+    The returned dict carries two extra keys for caller telemetry:
+      - `paused_applied`: True when this score triggered a new pause
+      - `pause_cleared`: True when this score cleared an existing pause
+    Callers (run_once) aggregate these to populate stats counters.
+    """
     lead_id = interaction.get("lead_id")
     tenant_id = interaction.get("tenant_id")
     body = (
@@ -554,28 +572,38 @@ def score_inbound(sb, interaction: dict[str, Any]) -> Optional[dict[str, Any]]:
     _update_lead_data(sb, tenant_id, lead_id, patch)
 
     # 3. Pause / recover logic
+    paused_applied = False
+    pause_cleared = False
     if avg is not None and avg <= THRESHOLD_PAUSE:
-        applied = _apply_pause(
+        paused_applied = _apply_pause(
             sb, tenant_id, lead_id, avg, result["score"],
             result["frustration_signals"], body,
         )
-        if applied:
+        if paused_applied:
             _log(
                 f"score_inbound: PAUSED lead={lead_id} avg={avg:.1f} "
                 f"latest={result['score']}"
             )
     elif result["score"] >= THRESHOLD_RECOVER:
-        cleared = _clear_pause(sb, tenant_id, lead_id, result["score"])
-        if cleared:
+        pause_cleared = _clear_pause(sb, tenant_id, lead_id, result["score"])
+        if pause_cleared:
             _log(f"score_inbound: RECOVERED lead={lead_id} score={result['score']}")
 
+    result["paused_applied"] = paused_applied
+    result["pause_cleared"] = pause_cleared
     return result
 
 
-def fetch_unscored_inbounds(sb, lookback_hours: int = INBOUND_LOOKBACK_HOURS) -> list[dict[str, Any]]:
+def fetch_unscored_inbounds(
+    sb,
+    tenant_id: str = SUNBIZ_TENANT_ID,
+    lookback_hours: int = INBOUND_LOOKBACK_HOURS,
+) -> list[dict[str, Any]]:
     """Return inbound merchant interactions from the last N hours that
-    don't yet have metadata.sentiment populated. SunBiz-scoped query —
-    filters by tenant_id implicitly via RLS."""
+    don't yet have metadata.sentiment populated. EXPLICITLY tenant-scoped
+    because the service-role client bypasses RLS — without this filter
+    Sentinel would score every tenant's inbounds (OASIS, PropFlow, etc.)
+    under SunBiz threshold logic. Tenant defaults to SunBiz."""
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=lookback_hours)).isoformat()
     try:
         rows = (
@@ -584,6 +612,7 @@ def fetch_unscored_inbounds(sb, lookback_hours: int = INBOUND_LOOKBACK_HOURS) ->
                 "id, tenant_id, lead_id, channel, direction, "
                 "content_preview, subject, metadata, created_at"
             )
+            .eq("tenant_id", tenant_id)
             .eq("direction", "inbound")
             .gte("created_at", cutoff)
             .order("created_at", desc=False)
@@ -602,14 +631,16 @@ def fetch_unscored_inbounds(sb, lookback_hours: int = INBOUND_LOOKBACK_HOURS) ->
     return out
 
 
-def run_once() -> dict[str, int]:
-    """Single pass: fetch unscored inbounds, score each, write back."""
+def run_once(tenant_id: str = SUNBIZ_TENANT_ID) -> dict[str, int]:
+    """Single pass: fetch unscored inbounds for the given tenant, score
+    each, write back. Returns telemetry dict with scored / paused /
+    recovered / errors counters bubbled up from score_inbound."""
     sb = _supabase()
     if not sb:
         _log("run_once: Supabase unavailable; skipping pass")
         return {"scored": 0, "paused": 0, "recovered": 0, "errors": 1}
 
-    inbounds = fetch_unscored_inbounds(sb)
+    inbounds = fetch_unscored_inbounds(sb, tenant_id=tenant_id)
     stats = {"scored": 0, "paused": 0, "recovered": 0, "errors": 0}
     for interaction in inbounds:
         try:
@@ -617,23 +648,33 @@ def run_once() -> dict[str, int]:
             if result is None:
                 continue
             stats["scored"] += 1
+            if result.get("paused_applied"):
+                stats["paused"] += 1
+            if result.get("pause_cleared"):
+                stats["recovered"] += 1
         except Exception as exc:  # noqa: BLE001
             _log(f"run_once: scoring error id={interaction.get('id')}: {exc}")
             stats["errors"] += 1
-    if stats["scored"]:
+    if stats["scored"] or stats["errors"]:
         _log(
-            f"run_once: scored={stats['scored']} "
+            f"run_once: tenant={tenant_id[:8]}.. scored={stats['scored']} "
             f"paused={stats['paused']} recovered={stats['recovered']} "
             f"errors={stats['errors']}"
         )
     return stats
 
 
-def run_loop(interval: int = DEFAULT_INTERVAL_SECONDS) -> None:
-    _log(f"sentinel: starting loop interval={interval}s window={ROLLING_WINDOW}")
+def run_loop(
+    interval: int = DEFAULT_INTERVAL_SECONDS,
+    tenant_id: str = SUNBIZ_TENANT_ID,
+) -> None:
+    _log(
+        f"sentinel: starting loop interval={interval}s "
+        f"window={ROLLING_WINDOW} tenant={tenant_id[:8]}.."
+    )
     while True:
         try:
-            run_once()
+            run_once(tenant_id=tenant_id)
         except Exception as exc:  # noqa: BLE001
             _log(f"sentinel loop: unhandled error: {exc}")
         time.sleep(interval)
@@ -650,8 +691,11 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     p_loop = sub.add_parser("loop", help="run continuously")
     p_loop.add_argument("--interval", type=int, default=DEFAULT_INTERVAL_SECONDS)
+    p_loop.add_argument("--tenant-id", default=SUNBIZ_TENANT_ID,
+                        help="tenant scope (default: SunBiz)")
 
-    sub.add_parser("once", help="single pass then exit")
+    p_once = sub.add_parser("once", help="single pass then exit")
+    p_once.add_argument("--tenant-id", default=SUNBIZ_TENANT_ID)
 
     p_score = sub.add_parser("score", help="score a single text — no DB writes")
     p_score.add_argument("--text", required=True)
@@ -660,10 +704,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     if args.cmd == "loop":
-        run_loop(interval=args.interval)
+        run_loop(interval=args.interval, tenant_id=args.tenant_id)
         return 0
     if args.cmd == "once":
-        stats = run_once()
+        stats = run_once(tenant_id=args.tenant_id)
         print(json.dumps(stats, indent=2))
         return 0
     if args.cmd == "score":
