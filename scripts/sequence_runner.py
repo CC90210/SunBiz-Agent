@@ -642,6 +642,11 @@ def _send_step(sb, state_row: dict, sequence: dict) -> dict:
     # based on the lead's tenant.
     tenant_brand = resolve_brand(state_row.get("tenant_id"))
 
+    # Pass tenant_id explicitly so send_gateway's kill-switch gate doesn't
+    # depend on its own DB lookup (which fail-closed for shop-out before
+    # CEO-Agent 1a0283a fixed it). We already know the tenant from the
+    # sequence row — trust it. Same pattern shop_out_sender.py uses.
+    _gw_tenant_id = state_row.get("tenant_id")
     try:
         if channel == "email":
             res = send(
@@ -652,6 +657,7 @@ def _send_step(sb, state_row: dict, sequence: dict) -> dict:
                 body_text=body,
                 body_html=body_html,
                 lead_id=state_row["lead_id"],
+                tenant_id=_gw_tenant_id,
                 agent_source=f"sequence:{sequence.get('name') or sequence.get('id')}",
                 brand=tenant_brand,
                 intent="commercial",
@@ -673,6 +679,7 @@ def _send_step(sb, state_row: dict, sequence: dict) -> dict:
                 to_phone=to_phone,
                 body_text=body,
                 lead_id=state_row["lead_id"],
+                tenant_id=_gw_tenant_id,
                 agent_source=f"sequence:{sequence.get('name') or sequence.get('id')}",
                 brand=tenant_brand,
                 intent="commercial",

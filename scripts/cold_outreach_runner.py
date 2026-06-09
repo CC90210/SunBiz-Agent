@@ -373,6 +373,12 @@ def _process_campaign(sb, campaign: dict[str, Any], send_fn) -> None:
             "agent_source": DAEMON_NAME,
             "brand": resolve_brand(tenant_id),
             "intent": "commercial",
+            # Same defensive pattern as shop_out_sender.py + sequence_runner.py
+            # — we know the tenant from the campaign row, so we pass it to
+            # send_gateway directly rather than relying on its DB lookup.
+            # The lookup can fail-closed when cold_lead_id resolves through
+            # cold_outreach_recipients rather than tenant_records.
+            "tenant_id": tenant_id,
         }
         if gw_channel == "email":
             send_kwargs["to_email"] = merged_address
