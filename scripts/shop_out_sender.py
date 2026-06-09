@@ -582,6 +582,13 @@ def _process_thread(client, send_fn, thread: dict, dry_run: bool) -> dict:
         to_email=recipient,
         cc_email=cc_email_param,
         lead_id=lead_id,
+        # Pass tenant_id explicitly. send_gateway's kill-switch gate (Codex
+        # audit 2026-06-08 finding #1) needs a resolved tenant to enforce
+        # operator panic-controls; if we don't supply it, the gate falls
+        # back to a DB lookup that can miss when lead_id is actually an
+        # application_id (the fallback above when app_data.lead_id is empty).
+        # We already know the tenant from the claimed thread row — trust it.
+        tenant_id=tenant_id,
         subject=subject,
         body_text=body,
         # B2B broker-to-lender outreach. Not consumer commercial mail
@@ -677,6 +684,43 @@ def run_loop(batch: int, tenant_id: Optional[str], interval: int, dry_run: bool)
         time.sleep(max(5, interval))
 
 
+def retry_errors(tenant_id: Optional[str], reason_substring: Optional[str], limit: int) -> dict:
+    """Flip error-status threads back to pending so the next tick re-sends.
+
+    Operator surface: when an upstream send_gateway bug blocks a batch
+    (e.g. the 2026-06-08 kill-switch-on-application-id false-fail), the
+    threads land at status='error' with last_error set. After the upstream
+    fix lands, the operator needs a one-liner to retry them. This is it.
+
+    Optional reason_substring lets the operator scope the retry to threads
+    that errored for a specific cause (matched against last_error ILIKE
+    '%substring%') — safer than blindly retrying every error row.
+    """
+    client = _supabase()
+    if client is None:
+        return {"ok": False, "error": "supabase_unavailable", "retried": 0}
+    q = (
+        client.table("application_lender_threads")
+        .select("id, tenant_id, last_error")
+        .eq("status", "error")
+        .limit(max(1, min(int(limit or 1), 500)))
+    )
+    if tenant_id:
+        q = q.eq("tenant_id", tenant_id)
+    if reason_substring:
+        q = q.ilike("last_error", f"%{reason_substring}%")
+    rows = list(q.execute().data or [])
+    if not rows:
+        return {"ok": True, "retried": 0, "matched": 0}
+    ids = [r["id"] for r in rows]
+    client.table("application_lender_threads").update({
+        "status": "pending",
+        "last_error": None,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }).in_("id", ids).execute()
+    return {"ok": True, "retried": len(ids), "matched": len(rows), "ids": ids}
+
+
 # ─── CLI ────────────────────────────────────────────────────────────
 
 def main() -> int:
@@ -697,6 +741,20 @@ def main() -> int:
 
     tail = sub.add_parser("tail", help="Print recent log lines")
     tail.add_argument("--lines", type=int, default=20)
+
+    retry = sub.add_parser(
+        "retry-errors",
+        help="Flip error-status threads back to pending for re-send",
+    )
+    retry.add_argument("--tenant-id", type=str, default=None)
+    retry.add_argument(
+        "--reason",
+        type=str,
+        default=None,
+        help="Only retry threads whose last_error ILIKE %reason% (scope-narrowing).",
+    )
+    retry.add_argument("--limit", type=int, default=100)
+    retry.add_argument("--json", action="store_true")
 
     args = parser.parse_args()
 
@@ -726,6 +784,18 @@ def main() -> int:
         for line in lines:
             sys.stdout.write(line)
         return 0
+
+    if args.cmd == "retry-errors":
+        summary = retry_errors(args.tenant_id, args.reason, args.limit)
+        if args.json:
+            print(json.dumps(summary, default=str))
+        else:
+            print(
+                f"retried={summary.get('retried', 0)} "
+                f"matched={summary.get('matched', 0)} "
+                f"ok={summary.get('ok')}"
+            )
+        return 0 if summary.get("ok") else 1
 
     return 1
 
