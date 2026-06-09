@@ -684,7 +684,7 @@ def run_loop(batch: int, tenant_id: Optional[str], interval: int, dry_run: bool)
         time.sleep(max(5, interval))
 
 
-def retry_errors(tenant_id: Optional[str], reason_substring: Optional[str], limit: int) -> dict:
+def retry_errors(tenant_id: str, reason_substring: Optional[str], limit: int) -> dict:
     """Flip error-status threads back to pending so the next tick re-sends.
 
     Operator surface: when an upstream send_gateway bug blocks a batch
@@ -692,10 +692,30 @@ def retry_errors(tenant_id: Optional[str], reason_substring: Optional[str], limi
     threads land at status='error' with last_error set. After the upstream
     fix lands, the operator needs a one-liner to retry them. This is it.
 
+    SAFETY (Codex audit 2026-06-09 [high]):
+      - tenant_id is REQUIRED. Without it, a no-args invocation could
+        fan out across every tenant in the DB and resend other tenants'
+        lender packets. This function previously accepted Optional[str]
+        and silently scoped to all tenants when None — a 12-row cross-
+        tenant write was hit during dev test runs (incident 2026-06-08).
+        Now we refuse to run without an explicit tenant_id.
+      - The UPDATE keeps tenant_id in the predicate (belt + suspenders).
+      - reason_substring narrows further but does NOT replace tenant scope.
+
     Optional reason_substring lets the operator scope the retry to threads
     that errored for a specific cause (matched against last_error ILIKE
-    '%substring%') — safer than blindly retrying every error row.
+    '%substring%').
     """
+    if not tenant_id:
+        return {
+            "ok": False,
+            "error": "tenant_id_required",
+            "detail": (
+                "retry-errors refuses to run without an explicit tenant_id "
+                "to prevent cross-tenant mass-resets. Pass --tenant-id."
+            ),
+            "retried": 0,
+        }
     client = _supabase()
     if client is None:
         return {"ok": False, "error": "supabase_unavailable", "retried": 0}
@@ -703,10 +723,9 @@ def retry_errors(tenant_id: Optional[str], reason_substring: Optional[str], limi
         client.table("application_lender_threads")
         .select("id, tenant_id, last_error")
         .eq("status", "error")
+        .eq("tenant_id", tenant_id)
         .limit(max(1, min(int(limit or 1), 500)))
     )
-    if tenant_id:
-        q = q.eq("tenant_id", tenant_id)
     if reason_substring:
         q = q.ilike("last_error", f"%{reason_substring}%")
     rows = list(q.execute().data or [])
@@ -717,8 +736,14 @@ def retry_errors(tenant_id: Optional[str], reason_substring: Optional[str], limi
         "status": "pending",
         "last_error": None,
         "updated_at": datetime.now(timezone.utc).isoformat(),
-    }).in_("id", ids).execute()
-    return {"ok": True, "retried": len(ids), "matched": len(rows), "ids": ids}
+    }).in_("id", ids).eq("tenant_id", tenant_id).eq("status", "error").execute()
+    return {
+        "ok": True,
+        "retried": len(ids),
+        "matched": len(rows),
+        "ids": ids,
+        "tenant_id": tenant_id,
+    }
 
 
 # ─── CLI ────────────────────────────────────────────────────────────
