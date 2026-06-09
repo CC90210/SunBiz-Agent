@@ -54,8 +54,9 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from sunbiz_constants import SUNBIZ_TENANT_ID  # noqa: E402
 
-SUNBIZ_TENANT_ID = "aa04fa1f-ad6a-44b0-ac4b-2ff5d1067110"
 SUNBIZ_TENANT_SLUG = "submissions"  # routed as "sun" by resolveClientProfileSlug
 
 

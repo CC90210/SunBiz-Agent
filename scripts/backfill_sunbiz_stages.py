@@ -45,7 +45,7 @@ STATE_DIR = REPO_ROOT / "state"
 LOG_PATH = STATE_DIR / "backfill_sunbiz_stages.log"
 
 # SunBiz tenant id resolved from `tenants` table (slug='submissions').
-SUNBIZ_TENANT_ID = "aa04fa1f-ad6a-44b0-ac4b-2ff5d1067110"
+from sunbiz_constants import SUNBIZ_TENANT_ID  # noqa: E402
 
 # Mapping: legacy stage/status value -> Salesforce-parity replacement.
 #

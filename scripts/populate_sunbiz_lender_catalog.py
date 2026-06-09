@@ -80,11 +80,8 @@ ENV_SEARCH_PATHS = [
     PROJECT_ROOT / ".env.agents",
 ]
 
-# SunBiz tenant id in the OASIS Supabase project. Resolved via
-# `select tenants where slug='submissions'` — committed here so the
-# script doesn't need a network round-trip just to find it. If the
-# SunBiz tenant slug or id ever moves, update this constant.
-SUNBIZ_TENANT_ID = "aa04fa1f-ad6a-44b0-ac4b-2ff5d1067110"
+# SunBiz tenant id — single source of truth in sunbiz_constants.py.
+from sunbiz_constants import SUNBIZ_TENANT_ID  # noqa: E402
 
 # Namespace UUID for deterministic lender row ids. Stable across runs
 # so re-importing the catalog upserts rather than duplicates.

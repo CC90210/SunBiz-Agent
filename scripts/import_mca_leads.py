@@ -73,7 +73,8 @@ from _bravo_bootstrap import bootstrap_bravo_path  # noqa: E402
 
 BRAVO_ROOT = bootstrap_bravo_path()
 
-SUNBIZ_TENANT_ID = "aa04fa1f-ad6a-44b0-ac4b-2ff5d1067110"
+from sunbiz_constants import SUNBIZ_TENANT_ID  # noqa: E402
+
 DEFAULT_STAGE = "hot_lead"  # Adon's intake = hot warm lead; sequence_runner
                             # will move it forward as drips progress.
 

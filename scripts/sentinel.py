@@ -95,9 +95,8 @@ DEFAULT_INTERVAL_SECONDS = 60
 # wants per-tenant opt-in for cross-cutting automation.
 #
 # To enable Sentinel for another tenant later: run a second pm2 daemon
-# with --tenant-id <other_uuid>, or change SENTINEL_TENANT_ID via env
-# override at start (the CLI honors --tenant-id too).
-SUNBIZ_TENANT_ID = "aa04fa1f-ad6a-44b0-ac4b-2ff5d1067110"
+# with --tenant-id <other_uuid> (the CLI honors --tenant-id too).
+from sunbiz_constants import SUNBIZ_TENANT_ID  # noqa: E402
 
 # Profanity / hostility tokens — case-insensitive substring match. The
 # LLM does the heavy lifting; this is a deterministic floor for the
