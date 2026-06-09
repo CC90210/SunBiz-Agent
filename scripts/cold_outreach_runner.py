@@ -58,6 +58,12 @@ BRAVO_ROOT = bootstrap_bravo_path()
 
 DAEMON_NAME = "cold_outreach_runner"
 DEFAULT_INTERVAL_SECONDS = 30
+# Tenant → brand mapping. The cold_outreach_campaigns table has no 'brand'
+# column (excluded from the SELECT — it 400s), so brand must be derived from
+# the campaign's tenant_id. Mirrors sequence_runner.py's tenant_brand logic so
+# both outbound daemons resolve SunBiz sends to the SunBiz CASL footer instead
+# of defaulting to the OASIS / Collingwood identity.
+SUNBIZ_TENANT = "aa04fa1f-ad6a-44b0-ac4b-2ff5d1067110"
 # Recipients stuck at status='sending' with no sent_at for this many seconds
 # are reclaimed as 'pending' so a subsequent tick can retry them.
 STALE_SENDING_TIMEOUT_SECONDS = 300
@@ -370,7 +376,7 @@ def _process_campaign(sb, campaign: dict[str, Any], send_fn) -> None:
             "channel": gw_channel,
             "body_text": rendered_body,
             "agent_source": DAEMON_NAME,
-            "brand": campaign.get("brand") or "oasis",
+            "brand": "sunbiz" if tenant_id == SUNBIZ_TENANT else "oasis",
             "intent": "commercial",
         }
         if gw_channel == "email":
