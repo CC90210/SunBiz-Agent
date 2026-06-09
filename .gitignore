@@ -57,3 +57,9 @@ data/email_logs/
 
 # Sun Biz Agent — local logs (SMS sends, scratch artifacts)
 tmp/
+
+# MCP configs — local only; ship .template (audit V2 P4)
+.claude/mcp.json
+.vscode/mcp.json
+!.claude/mcp.json.template
+!.vscode/mcp.json.template
