@@ -67,6 +67,7 @@ LOG_PATH = STATE_DIR / "sequence_runner.log"
 # (_bravo_bootstrap.py) and any local sibling imports resolve.
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from _bravo_bootstrap import bootstrap_bravo_path  # noqa: E402
+from sunbiz_constants import resolve_brand  # noqa: E402
 
 # Resolve CEO-Agent runtime and add its scripts/ to sys.path so the
 # shared infrastructure imports below — lib.secret_loader,
@@ -639,8 +640,7 @@ def _send_step(sb, state_row: dict, sequence: dict) -> dict:
     # original hardcoded brand="oasis" implied. send_gateway's BRAND_IDENTITY
     # registry already has the "sunbiz" entry — we just need to pick it
     # based on the lead's tenant.
-    SUNBIZ_TENANT = "aa04fa1f-ad6a-44b0-ac4b-2ff5d1067110"
-    tenant_brand = "sunbiz" if state_row.get("tenant_id") == SUNBIZ_TENANT else "oasis"
+    tenant_brand = resolve_brand(state_row.get("tenant_id"))
 
     try:
         if channel == "email":
