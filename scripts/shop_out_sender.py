@@ -771,7 +771,12 @@ def main() -> int:
         "retry-errors",
         help="Flip error-status threads back to pending for re-send",
     )
-    retry.add_argument("--tenant-id", type=str, default=None)
+    # --tenant-id is REQUIRED at the argparse layer so a no-args invocation
+    # exits with a helpful usage message BEFORE reaching the function body
+    # (which also guards the same way as belt + suspenders). Codex audit
+    # 2026-06-09 [high]: a default=None invocation previously fanned out
+    # to every tenant.
+    retry.add_argument("--tenant-id", type=str, required=True)
     retry.add_argument(
         "--reason",
         type=str,
