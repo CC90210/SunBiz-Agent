@@ -1,0 +1,1 @@
+{"template": "Tags: {{lead.tags}}", "ctx": {"lead": {"tags": ["vip"]}}}

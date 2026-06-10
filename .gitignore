@@ -63,3 +63,6 @@ tmp/
 .vscode/mcp.json
 !.claude/mcp.json.template
 !.vscode/mcp.json.template
+
+# eval run artifacts
+evals/reports/

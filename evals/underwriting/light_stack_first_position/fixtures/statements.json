@@ -1,0 +1,6 @@
+[
+  {"total_deposits": 50000, "nsf_events": 0, "overdraft_days": 0,
+   "identified_loan_payments": [
+     {"lender_hint": "Funding Circle", "amount": 1200, "frequency": "monthly"}
+   ]}
+]

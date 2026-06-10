@@ -1,0 +1,1 @@
+{"template": "Bal: {{lead.monthly_revenue}}", "ctx": {"lead": {"monthly_revenue": 25000}}}

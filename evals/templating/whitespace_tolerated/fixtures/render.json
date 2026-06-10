@@ -1,0 +1,1 @@
+{"template": "Hi {{ lead.first_name }}", "ctx": {"lead": {"first_name": "X"}}}

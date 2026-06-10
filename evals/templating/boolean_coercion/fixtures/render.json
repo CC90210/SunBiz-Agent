@@ -1,0 +1,1 @@
+{"template": "Toggle: {{lead.opted_in}}", "ctx": {"lead": {"opted_in": false}}}

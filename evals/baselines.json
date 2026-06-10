@@ -1,0 +1,18 @@
+{
+  "underwriting": {
+    "score": 1.0,
+    "tolerance": 0.1
+  },
+  "templating": {
+    "score": 1.0,
+    "tolerance": 0.1
+  },
+  "routing": {
+    "score": 1.0,
+    "tolerance": 0.1
+  },
+  "compliance": {
+    "score": 1.0,
+    "tolerance": 0.1
+  }
+}
