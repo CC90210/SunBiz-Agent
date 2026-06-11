@@ -413,6 +413,89 @@ def _cancel_drips_for_lead(sb, tenant_id: str, lead_id: str, form_id: str) -> in
     return cancelled
 
 
+def _bridge_bearer() -> str:
+    """BRIDGE_BEARER_TOKEN from process env, falling back to .env.agents
+    via the shared secret loader. Empty string when unavailable."""
+    tok = (os.environ.get("BRIDGE_BEARER_TOKEN") or "").strip()
+    if tok:
+        return tok
+    try:
+        from lib.secret_loader import load_env  # type: ignore
+        return (load_env().get("BRIDGE_BEARER_TOKEN") or "").strip()
+    except Exception:
+        return ""
+
+
+def _fire_underwriting_auto(sb, tenant_id: str, application_id: str) -> bool:
+    """Application hit status='submitted' — enqueue the underwriting chain
+    (statement_parser → debt_detector → sales_angle) via the local bridge's
+    underwriting_run tool, so Adon doesn't have to ask Solara in chat.
+
+    Fire-and-forget: wait_for_complete=False just inserts the pending
+    application_underwriting row; the Underwriting Orchestrator cron
+    (tenant_cron_jobs, */15) does the actual run. Blocking this daemon's
+    tick on a full underwriting run would starve drip execution.
+
+    Idempotency: skip if ANY application_underwriting row exists for this
+    application in the last 24h — re-shopping / status re-flips don't
+    re-underwrite (each run burns Claude tokens). The bridge tool also
+    reuses in-flight pending/parsing rows, so the worst double-fire race
+    (operator clicks Underwrite at the same moment) collapses to one run.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    try:
+        recent = (
+            sb.table("application_underwriting")
+            .select("id, status, run_at")
+            .eq("tenant_id", tenant_id)
+            .eq("application_id", application_id)
+            .gt("run_at", cutoff)
+            .limit(1)
+            .execute()
+        )
+        if recent.data:
+            _log(
+                f"underwriting_auto: skip app={application_id} — run "
+                f"{recent.data[0]['id']} ({recent.data[0]['status']}) within 24h"
+            )
+            return False
+    except Exception as e:
+        # Dedup read failure: fire anyway — the bridge tool reuses
+        # in-flight rows, and a duplicate completed run is recoverable.
+        _log(f"underwriting_auto: dedup check failed app={application_id}: {e}")
+
+    bearer = _bridge_bearer()
+    if not bearer:
+        _log(f"underwriting_auto: no BRIDGE_BEARER_TOKEN — cannot fire app={application_id}")
+        return False
+    try:
+        import requests  # lazy — not needed by any other path in this daemon
+        r = requests.post(
+            "http://localhost:9100/exec-tool",
+            headers={"Authorization": f"Bearer {bearer}"},
+            json={
+                "tool_name": "underwriting_run",
+                "input": {
+                    "application_id": application_id,
+                    "triggered_by": "automatic",
+                    "wait_for_complete": False,
+                },
+            },
+            timeout=30,
+        )
+        body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        if r.status_code == 200 and body.get("ok") and not body.get("is_error"):
+            _log(f"underwriting_auto: enqueued app={application_id} tenant={tenant_id}")
+            return True
+        _log(
+            f"underwriting_auto: bridge rejected app={application_id} "
+            f"http={r.status_code} body={str(body)[:300]}"
+        )
+    except Exception as e:
+        _log(f"underwriting_auto: bridge call failed app={application_id}: {e}")
+    return False
+
+
 def enrollment_tick(sb) -> int:
     """Read new agent_events since the cursor, enroll matching leads.
     Returns the number of enrollments inserted."""
@@ -464,6 +547,19 @@ def enrollment_tick(sb) -> int:
                         f"form_hook: cancelled {n} drip(s) "
                         f"lead={form_lead_id} form={form_id}"
                     )
+
+        # Underwriting auto-fire — application transitioned to 'submitted'
+        # (operator uploaded bank statements via the drawer). Runs before
+        # the drip lookup so a drip_sequences read failure can't skip it.
+        if (
+            event_type == "BRAVO_RECORD_STATUS_CHANGED"
+            and payload.get("entity") == "application"
+            and str(payload.get("field") or "").lower() in ("status", "stage")
+            and str(payload.get("to") or "").strip().lower() == "submitted"
+        ):
+            uw_app_id = payload.get("record_id")
+            if uw_app_id:
+                _fire_underwriting_auto(sb, tenant_id, uw_app_id)
 
         # Find active sequences for this tenant + event_type. Tenant
         # isolation is handled at the row level via tenant_id match —

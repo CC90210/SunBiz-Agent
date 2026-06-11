@@ -92,7 +92,9 @@ def underwriting_run(
         .maybe_single()
         .execute()
     )
-    if not app_row.data:
+    # maybe_single().execute() returns None (not a response object) when
+    # zero rows match — guard the object, not just .data.
+    if not app_row or not app_row.data:
         return _err(f"application_id {application_id} not found in tenant_records")
     tenant_id = app_row.data.get("tenant_id")
     if not tenant_id:
@@ -108,7 +110,7 @@ def underwriting_run(
         .maybe_single()
         .execute()
     )
-    if in_flight.data:
+    if in_flight and in_flight.data:
         existing_run_id = in_flight.data["id"]
         if not wait_for_complete:
             return _ok(json.dumps({
@@ -165,7 +167,7 @@ def underwriting_run(
             )
         except Exception:
             continue
-        if not row.data:
+        if not row or not row.data:
             return _err(f"underwriting row {run_id} disappeared mid-poll — DB inconsistency")
         last_status = row.data.get("status") or last_status
         if last_status == "complete":
@@ -194,7 +196,7 @@ def underwriting_run(
                     .maybe_single()
                     .execute()
                 )
-                current_data = (app_now.data or {}).get("data") or {}
+                current_data = (getattr(app_now, "data", None) or {}).get("data") or {}
                 merged = {**current_data, "underwriting_jsonb": legacy_jsonb}
                 sb.table("tenant_records").update({
                     "data": merged,
