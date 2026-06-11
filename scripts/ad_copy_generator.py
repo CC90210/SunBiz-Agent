@@ -4,8 +4,9 @@ SunBiz Funding - AI Ad Copy Generator
 =======================================
 Generates MCA-compliant ad copy for SunBiz Funding campaigns.
 
-Primary path:  Gemini API (via GEMINI_API_KEY in .env.agents) — generative copy.
-Fallback path: Built-in template banks — no API key required, always works.
+Primary path:  Claude (Anthropic Messages API via ANTHROPIC_API_KEY) — generative copy.
+Fallback path: Gemini API (via GEMINI_API_KEY), then built-in template banks
+               (no API key required, always works).
 
 Compliance rules enforced on ALL output:
   - Forbidden: "loan", "MCA", "merchant cash advance", "guaranteed approval",
@@ -85,6 +86,18 @@ def _load_env_agents() -> dict[str, str]:
             key, _, value = line.partition("=")
             creds[key.strip()] = value.strip()
     return creds
+
+
+def _claude_model() -> str:
+    """Canonical Sonnet ID from the shared model registry (ad copy is
+    customer-facing brand voice → Sonnet drafting tier), with the literal as a
+    fallback when lib.model_registry isn't on sys.path."""
+    try:
+        sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
+        from lib.model_registry import SONNET  # type: ignore
+        return SONNET
+    except Exception:
+        return "claude-sonnet-4-6"
 
 
 # ---------------------------------------------------------------------------
@@ -350,10 +363,28 @@ class AdCopyGenerator:
         self._use_gemini = bool(
             self._gemini_api_key and not self._gemini_api_key.startswith("INSERT_")
         )
-        if self._use_gemini:
-            log.info("Gemini API key detected — AI copy generation enabled.")
+        # Claude is the preferred provider — same Anthropic key + model tier as
+        # the rest of the fleet. Gemini and the template banks are fallbacks.
+        anthropic_key = (
+            creds.get("ANTHROPIC_API_KEY") or creds.get("BRAVO_ANTHROPIC_API_KEY") or ""
+        )
+        self._anthropic_api_key: str = anthropic_key.strip()
+        self._use_claude = bool(
+            self._anthropic_api_key and not self._anthropic_api_key.startswith("INSERT_")
+        )
+        self._claude_model: str = _claude_model()
+        # Gate for LLM-vs-template: true if either provider is configured.
+        self._use_llm = self._use_claude or self._use_gemini
+        self._last_provider = "template"
+        if self._use_claude:
+            log.info(
+                "Anthropic key detected — Claude copy generation enabled (model=%s).",
+                self._claude_model,
+            )
+        elif self._use_gemini:
+            log.info("No Anthropic key; Gemini key detected — Gemini copy generation enabled.")
         else:
-            log.info("No Gemini API key — using template banks for copy generation.")
+            log.info("No LLM key — using template banks for copy generation.")
 
     # ------------------------------------------------------------------
     # Public API
@@ -381,7 +412,7 @@ class AdCopyGenerator:
         self._validate_campaign_type(campaign_type)
         num_variations = max(1, min(10, num_variations))
 
-        if self._use_gemini:
+        if self._use_llm:
             return self._generate_via_gemini(campaign_type, tone, num_variations)
         return self._generate_from_templates(campaign_type, tone, num_variations)
 
@@ -403,7 +434,7 @@ class AdCopyGenerator:
         Returns:
             List of 3 AdCopyVariation objects.
         """
-        if not self._use_gemini:
+        if not self._use_llm:
             log.info("Gemini not available — generating template-based alternatives.")
             return self._generate_from_templates("growth_capital", tone, 3)
 
@@ -447,7 +478,7 @@ class AdCopyGenerator:
         """
         self._validate_campaign_type(campaign_type)
 
-        if not self._use_gemini:
+        if not self._use_llm:
             log.info("Gemini not available — generating seasonal template variants.")
             variants = self._generate_from_templates(campaign_type, "confident", num_variations)
             # Inject season into headlines
@@ -540,7 +571,7 @@ class AdCopyGenerator:
         self._validate_campaign_type(campaign_type)
         count = max(1, min(20, count))
 
-        if self._use_gemini:
+        if self._use_llm:
             tone_desc = _TONE_DESCRIPTORS.get(tone, tone)
             prompt = (
                 "You are a financial services copywriter for SunBiz Funding.\n\n"
@@ -554,7 +585,7 @@ class AdCopyGenerator:
                 f"Return ONLY a JSON array of {count} headline strings. Pure JSON only."
             )
             try:
-                raw = self._call_gemini_raw(prompt)
+                raw = self._call_llm_raw(prompt)
                 headlines: list[str] = json.loads(raw)
                 if isinstance(headlines, list):
                     return [h for h in headlines if self.validate_compliance(h).passed][:count]
@@ -587,7 +618,7 @@ class AdCopyGenerator:
         self._validate_campaign_type(campaign_type)
         count = max(1, min(20, count))
 
-        if self._use_gemini:
+        if self._use_llm:
             tone_desc = _TONE_DESCRIPTORS.get(tone, tone)
             prompt = (
                 "You are a financial services copywriter for SunBiz Funding.\n\n"
@@ -602,7 +633,7 @@ class AdCopyGenerator:
                 f"Return ONLY a JSON array of {count} description strings. Pure JSON only."
             )
             try:
-                raw = self._call_gemini_raw(prompt)
+                raw = self._call_llm_raw(prompt)
                 descriptions: list[str] = json.loads(raw)
                 if isinstance(descriptions, list):
                     return [d for d in descriptions if self.validate_compliance(d).passed][:count]
@@ -671,7 +702,7 @@ class AdCopyGenerator:
         fall back to templates on any failure.
         """
         try:
-            raw = self._call_gemini_raw(prompt)
+            raw = self._call_llm_raw(prompt)
             parsed = json.loads(raw)
             if not isinstance(parsed, list):
                 raise ValueError("Gemini response is not a JSON array.")
@@ -703,7 +734,7 @@ class AdCopyGenerator:
                         cta=cta,
                         campaign_type=campaign_type,
                         tone=tone,
-                        source="gemini",
+                        source=self._last_provider,
                     )
                 )
 
@@ -716,6 +747,61 @@ class AdCopyGenerator:
             log.warning("Gemini call failed (%s) — falling back to templates.", exc)
 
         return self._generate_from_templates(campaign_type, tone, fallback_count)
+
+    def _call_llm_raw(self, prompt: str) -> str:
+        """Provider-preferring raw text call: Claude first, Gemini as fallback.
+
+        Records the provider that produced the text on ``self._last_provider``
+        so callers can tag the output's ``source`` accurately. Raises if no
+        provider is configured (callers catch and fall back to templates).
+        """
+        if self._use_claude:
+            try:
+                text = self._call_claude_raw(prompt)
+                self._last_provider = "claude"
+                return text
+            except Exception as exc:  # pylint: disable=broad-except
+                log.warning("Claude call failed (%s) — trying Gemini fallback.", exc)
+        if self._use_gemini:
+            text = self._call_gemini_raw(prompt)
+            self._last_provider = "gemini"
+            return text
+        raise RuntimeError("no LLM provider configured")
+
+    def _call_claude_raw(self, prompt: str) -> str:
+        """
+        POST to the Anthropic Messages API and return the model's raw text,
+        with any markdown JSON fences stripped (mirrors _call_gemini_raw).
+        """
+        response = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": self._anthropic_api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": self._claude_model,
+                "max_tokens": 2048,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        raw_text = "".join(
+            blk.get("text", "")
+            for blk in data.get("content", [])
+            if blk.get("type") == "text"
+        )
+        if not raw_text:
+            raise ValueError("Empty text in Anthropic response.")
+
+        # Strip markdown code fences if the model wraps JSON in them
+        raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text.strip(), flags=re.IGNORECASE)
+        raw_text = re.sub(r"\s*```$", "", raw_text.strip())
+        return raw_text.strip()
 
     def _call_gemini_raw(self, prompt: str) -> str:
         """

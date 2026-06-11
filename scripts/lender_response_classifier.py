@@ -62,6 +62,19 @@ from _bravo_bootstrap import bootstrap_bravo_path  # noqa: E402
 # integrations/google_tool.py resolve.
 BRAVO_ROOT = bootstrap_bravo_path()
 
+
+def _haiku_model() -> str:
+    """Canonical Haiku ID from the shared model registry (CEO-Agent path is
+    bootstrapped above), with the literal as a defensive fallback."""
+    try:
+        from lib.model_registry import HAIKU  # type: ignore
+        return HAIKU
+    except Exception:
+        return "claude-haiku-4-5-20251001"
+
+
+CLASSIFIER_MODEL = _haiku_model()
+
 # Look back this far when scanning Gmail threads on each poll. Older
 # threads are presumed already-classified or no_response (and would
 # have aged out via the SLA check anyway). Tunable.
@@ -315,7 +328,7 @@ def extract_missing_info(body: str) -> dict:
                 "content-type": "application/json",
             },
             json={
-                "model": "claude-haiku-4-5-20251001",
+                "model": CLASSIFIER_MODEL,
                 "max_tokens": 300,
                 "messages": [{"role": "user", "content": prompt}],
             },
@@ -482,7 +495,7 @@ def classify_with_claude(body: str) -> dict:
                 "content-type": "application/json",
             },
             json={
-                "model": "claude-haiku-4-5-20251001",
+                "model": CLASSIFIER_MODEL,
                 "max_tokens": 200,
                 "messages": [{"role": "user", "content": prompt}],
             },
@@ -531,6 +544,219 @@ def classify_with_claude(body: str) -> dict:
 # of similar shape (industry × revenue × FICO × time_in_business).
 # Best-effort: caller wraps this in try/except; failure here must never
 # roll back the thread status update.
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Offer-term extractor — second pass on `approved` threads
+# ─────────────────────────────────────────────────────────────────────
+#
+# When a lender approves, the email usually carries the actual terms
+# (advance amount, factor/buy rate, term, payment schedule). This pass
+# pulls them into structured fields on the application record so the
+# downstream lender-feedback row and the operator dashboard show the
+# real funded numbers instead of NULLs. `_persist_lender_feedback` reads
+# funded_amount / funded_term_days / funded_buy_rate straight from the
+# application's tenant_records.data, so we write the canonical keys there.
+
+OFFER_VOCAB_NOTE = (
+    "MCA/funding offer terms. 'factor rate' (a.k.a. buy rate) is a multiplier "
+    "like 1.32 or 1.49. 'advance' / 'funded amount' is the dollars wired to the "
+    "merchant. 'payback' / 'RTR' is the total to be repaid. Payment frequency is "
+    "usually daily or weekly."
+)
+
+OFFER_EXTRACT_PROMPT = """You are extracting the OFFER TERMS from a lender's approval email for a business-funding (MCA) submission.
+
+Context: {vocab}
+
+Return JSON with EXACTLY these keys (use null when the email does not state a value — never guess):
+{{
+  "funded_amount":   <number | null>,   // dollars advanced / approved, no $ or commas
+  "factor_rate":     <number | null>,   // buy/factor rate multiplier, e.g. 1.42
+  "term_days":       <integer | null>,  // term length in days (convert weeks*7, months*~30)
+  "payback_amount":  <number | null>,   // total payback / RTR in dollars
+  "payment_amount":  <number | null>,   // per-payment dollar amount
+  "payment_frequency": <"daily" | "weekly" | "monthly" | null>
+}}
+
+Rules:
+- Only extract values the email explicitly states. Do not infer or compute beyond unit conversion (weeks->days, months->days).
+- Strip currency symbols and thousands separators from numbers.
+- If the email is an approval with NO concrete terms, return all nulls.
+- No prose, no markdown — pure JSON object only.
+
+Email body between markers:
+
+<email>
+{body}
+</email>
+"""
+
+# Map the model's extraction keys -> the canonical application-record keys
+# that _persist_lender_feedback reads (lines ~607-621).
+_OFFER_KEY_MAP = {
+    "funded_amount": "funded_amount",
+    "factor_rate": "funded_buy_rate",
+    "term_days": "funded_term_days",
+}
+
+
+def _coerce_number(value, *, as_int: bool = False):
+    """Best-effort numeric coercion from the model's output. Accepts numbers
+    or strings like '$50,000' / '1.42'. Returns None on anything non-numeric."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value) if as_int else float(value)
+    if isinstance(value, str):
+        cleaned = value.strip().replace("$", "").replace(",", "").replace("%", "")
+        if not cleaned:
+            return None
+        try:
+            num = float(cleaned)
+        except ValueError:
+            return None
+        return int(num) if as_int else num
+    return None
+
+
+def extract_offer_terms(body: str) -> dict:
+    """Second-pass extractor for `approved` threads: pull structured offer
+    terms from the lender email via Claude. Returns a dict containing only the
+    keys the model could fill (values coerced to numbers). Returns {} on any
+    error — best-effort, never raises into the caller."""
+    api_key = _load_env_var("ANTHROPIC_API_KEY")
+    if not api_key:
+        return {}
+    try:
+        import requests
+    except ImportError:
+        return {}
+
+    prompt = OFFER_EXTRACT_PROMPT.format(vocab=OFFER_VOCAB_NOTE, body=body[:4000])
+    try:
+        r = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": CLASSIFIER_MODEL,
+                "max_tokens": 300,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=30,
+        )
+    except requests.RequestException as e:
+        _log(f"offer_terms: network error: {e}")
+        return {}
+    if r.status_code >= 400:
+        _log(f"offer_terms: Anthropic HTTP {r.status_code}")
+        return {}
+    try:
+        data = r.json()
+    except ValueError:
+        return {}
+
+    text = "".join(
+        blk.get("text", "") for blk in data.get("content", []) if blk.get("type") == "text"
+    ).strip()
+    s, e = text.find("{"), text.rfind("}")
+    if s == -1 or e <= s:
+        return {}
+    try:
+        raw = json.loads(text[s : e + 1])
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+
+    out: dict = {}
+    fa = _coerce_number(raw.get("funded_amount"))
+    if fa is not None and fa > 0:
+        out["funded_amount"] = fa
+    fr = _coerce_number(raw.get("factor_rate"))
+    if fr is not None and fr > 0:
+        out["factor_rate"] = fr
+    td = _coerce_number(raw.get("term_days"), as_int=True)
+    if td is not None and td > 0:
+        out["term_days"] = td
+    pa = _coerce_number(raw.get("payback_amount"))
+    if pa is not None and pa > 0:
+        out["payback_amount"] = pa
+    pmt = _coerce_number(raw.get("payment_amount"))
+    if pmt is not None and pmt > 0:
+        out["payment_amount"] = pmt
+    pf = raw.get("payment_frequency")
+    if isinstance(pf, str) and pf.strip().lower() in ("daily", "weekly", "monthly"):
+        out["payment_frequency"] = pf.strip().lower()
+    return out
+
+
+def apply_offer_terms(sb, *, tenant_id: str, application_id: str, terms: dict) -> dict:
+    """Fill-only merge of extracted offer terms into the application record's
+    tenant_records.data. NEVER overwrites a value the operator (or a prior
+    extraction) already set — only fills keys that are currently absent/None.
+    Returns the dict of keys actually written (empty if nothing changed)."""
+    if not terms or not tenant_id or not application_id:
+        return {}
+    try:
+        rows = (
+            sb.table("tenant_records")
+            .select("id, data")
+            .eq("tenant_id", tenant_id)
+            .eq("entity_type", "application")
+            .eq("id", application_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception as e:
+        _log(f"offer_terms: application lookup failed app={application_id}: {e}")
+        return {}
+    if not rows.data:
+        return {}
+
+    row = rows.data[0]
+    app_data = row.get("data") or {}
+    written: dict = {}
+
+    # Canonical numeric terms _persist_lender_feedback reads. Fill-only.
+    for src_key, canon_key in _OFFER_KEY_MAP.items():
+        val = terms.get(src_key)
+        if val is None:
+            continue
+        if app_data.get(canon_key) in (None, ""):
+            app_data[canon_key] = val
+            written[canon_key] = val
+
+    # Keep the full extracted offer for provenance / dashboard display.
+    # This is additive metadata, not a field _persist reads.
+    existing_offer = app_data.get("offer_terms") or {}
+    if isinstance(existing_offer, dict):
+        merged_offer = {**terms, **existing_offer}  # existing wins (fill-only)
+    else:
+        merged_offer = dict(terms)
+    if merged_offer != existing_offer:
+        app_data["offer_terms"] = merged_offer
+        written.setdefault("offer_terms", merged_offer)
+
+    if not written:
+        return {}
+    try:
+        sb.table("tenant_records").update({"data": app_data}).eq("id", row["id"]).execute()
+    except Exception as e:
+        _log(f"offer_terms: application update failed app={application_id}: {e}")
+        return {}
+    return written
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Lender-feedback persistence
+# ─────────────────────────────────────────────────────────────────────
 
 
 def _persist_lender_feedback(sb, thread: dict, label: str) -> None:
@@ -703,6 +929,27 @@ def classify_tick(sb) -> int:
             _log(f"classified thread={r['id']} -> {new_status}: {result['summary']}")
         except Exception as e:
             _log(f"classify_tick: update failed row={r['id']}: {e}")
+
+        # When the lender approved, second-pass extract the offer terms
+        # (advance, factor rate, term) from the email and write them onto the
+        # application record BEFORE the lender_feedback row is persisted —
+        # _persist_lender_feedback reads funded_amount/term/buy_rate from the
+        # application's tenant_records.data. Fill-only: never clobbers values
+        # the operator already entered. Best-effort; crash here is non-fatal.
+        if result.get("label") == "approved":
+            try:
+                terms = extract_offer_terms(body)
+                if terms:
+                    written = apply_offer_terms(
+                        sb,
+                        tenant_id=r.get("tenant_id"),
+                        application_id=r.get("application_id"),
+                        terms=terms,
+                    )
+                    if written:
+                        _log(f"offer_terms applied thread={r['id']} -> {written}")
+            except Exception as e:
+                _log(f"offer_terms: extraction crashed thread={r['id']} (non-fatal): {e}")
 
         # 2026-05-25 second SunBiz product meeting expansion + migration 069:
         # Persist lender intelligence tuple so the recommender can bias

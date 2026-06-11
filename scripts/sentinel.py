@@ -74,6 +74,19 @@ from _bravo_bootstrap import bootstrap_bravo_path  # noqa: E402
 BRAVO_ROOT = bootstrap_bravo_path()
 
 
+def _sentinel_model() -> str:
+    """Canonical Haiku ID from the shared model registry (CEO-Agent path is
+    bootstrapped above), with the literal as a defensive fallback."""
+    try:
+        from lib.model_registry import HAIKU  # type: ignore
+        return HAIKU
+    except Exception:
+        return "claude-haiku-4-5-20251001"
+
+
+SENTINEL_MODEL = _sentinel_model()
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Tunables
 # ─────────────────────────────────────────────────────────────────────
@@ -289,7 +302,7 @@ def classify_sentiment(body: str) -> dict[str, Any]:
                     "content-type": "application/json",
                 },
                 json={
-                    "model": "claude-haiku-4-5-20251001",
+                    "model": SENTINEL_MODEL,
                     "max_tokens": 250,
                     "messages": [{"role": "user", "content": prompt}],
                 },

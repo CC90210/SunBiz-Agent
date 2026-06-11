@@ -42,7 +42,21 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-DEFAULT_MODEL = "claude-sonnet-4-6"
+
+
+def _default_model() -> str:
+    """Canonical Sonnet ID from the shared model registry, with the literal as
+    a standalone-CLI fallback (lib.model_registry lives in CEO-Agent/scripts/lib,
+    which is only on sys.path when bootstrapped via the orchestrator)."""
+    try:
+        sys.path.insert(0, str(REPO_ROOT / "scripts"))
+        from lib.model_registry import SONNET  # type: ignore
+        return SONNET
+    except Exception:
+        return "claude-sonnet-4-6"
+
+
+DEFAULT_MODEL = _default_model()
 DEFAULT_MAX_PAGES = 12      # bank statements are typically 4-10 pages
 DEFAULT_TIMEOUT_S = 120     # vision is slower than text
 
