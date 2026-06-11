@@ -36,11 +36,13 @@ CLI:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import quote
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -137,12 +139,37 @@ def _first_word(name: str) -> str:
     return parts[0] if parts else ""
 
 
-def _substitute_vars(template: str, recipient: dict[str, Any], lead: dict[str, Any]) -> str:
-    """Replace {{first_name}} and {{business_name}} tokens in a template string."""
+# Visible unsubscribe link target for HTML email templates. Same env
+# override + default as email_blast.py — the /unsubscribe handler feeds
+# the suppression list send_gateway enforces.
+UNSUBSCRIBE_BASE_URL = os.getenv(
+    "EMAIL_UNSUBSCRIBE_BASE_URL", "https://sunbizfunding.com/unsubscribe"
+)
+
+
+def _substitute_vars(
+    template: str,
+    recipient: dict[str, Any],
+    lead: dict[str, Any],
+    campaign_id: str = "",
+    contact_address: str = "",
+) -> str:
+    """Replace template tokens. The dashboard's HTML marketing templates
+    (docs/*.html, picked in the Cold Outreach composer) use four:
+    {{first_name}}, {{business_name}}, {{year}}, {{unsubscribe_url}}."""
     contact_name = lead.get("contact_name") or recipient.get("contact_name") or ""
     business_name = lead.get("business_name") or recipient.get("business_name") or ""
     result = template.replace("{{first_name}}", _first_word(contact_name))
     result = result.replace("{{business_name}}", business_name)
+    result = result.replace("{{year}}", str(datetime.now(timezone.utc).year))
+    if "{{unsubscribe_url}}" in result:
+        unsub = UNSUBSCRIBE_BASE_URL
+        if contact_address:
+            unsub = (
+                f"{UNSUBSCRIBE_BASE_URL}?email={quote(contact_address)}"
+                f"&campaign={quote(campaign_id)}"
+            )
+        result = result.replace("{{unsubscribe_url}}", unsub)
     return result
 
 
@@ -349,8 +376,8 @@ def _process_campaign(sb, campaign: dict[str, Any], send_fn) -> None:
             failed_count += 1
             continue
 
-        rendered_body = _substitute_vars(message_body, rec, lead)
-        rendered_subject = _substitute_vars(subject, rec, lead)
+        rendered_body = _substitute_vars(message_body, rec, lead, campaign_id, merged_address)
+        rendered_subject = _substitute_vars(subject, rec, lead, campaign_id, merged_address)
 
         # Build send_gateway kwargs. The campaign.channel is one of
         # 'email'|'sms'|'sms_texttorrent'|'sms_twilio' (migration 069), but
