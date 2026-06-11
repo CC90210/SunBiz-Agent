@@ -66,3 +66,9 @@ tmp/
 
 # eval run artifacts
 evals/reports/
+
+# Runtime artifacts (daemon logs, cursors) — never tracked
+state/
+
+# Runtime symlink into CEO-Agent (created on the VPS, not portable)
+scripts/send_gateway.py

@@ -85,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
 
     copied = maybe_copy_env_template(args.copy_env_template)
     if copied:
-        print("[4/4] Created the credentials template. Add real JotForm, Text Torrent, and email credentials before production use.")
+        print("[4/4] Created the credentials template. Add real Text Torrent and email credentials before production use.")
     else:
         print("[4/4] Existing credentials file left untouched.")
 
@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     print("")
     print("Onboarding complete.")
     print("Next steps:")
-    print("1. Add live JotForm, Text Torrent, and email credentials if any pulse checks failed.")
+    print("1. Add live Text Torrent and email credentials if any pulse checks failed.")
     print("2. Re-run `python scripts/doctor.py --deep` once those connections are wired.")
     print("3. Start the hosted runtime with `python scripts/api_server.py`.")
 

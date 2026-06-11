@@ -5,7 +5,6 @@ Exposes the small production contract the command center already expects:
 - GET /health
 - GET /status
 - POST /sms/send
-- POST /webhook/jotform
 """
 
 from __future__ import annotations
@@ -13,10 +12,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import hmac
-import json
 import os
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +25,6 @@ from sms_engine import send_sms, status as sms_status
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ENV_PATH = PROJECT_ROOT / ".env.agents"
-WEBHOOK_LOG_PATH = PROJECT_ROOT / "tmp" / "jotform_webhook.jsonl"
 
 app = FastAPI(title="Sun Biz Agent API", version="1.2.0")
 
@@ -90,73 +86,6 @@ def _require_oasis_signature(request: Request, raw_body: bytes, body: SMSRequest
         raise HTTPException(status_code=401, detail="invalid signature")
 
 
-def _append_webhook_log(payload: dict[str, Any], request: Request) -> None:
-    WEBHOOK_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    record = {
-        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "content_type": request.headers.get("content-type", ""),
-        "payload": payload,
-    }
-    with WEBHOOK_LOG_PATH.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record) + "\n")
-
-
-def _emit_lead_event(payload: dict[str, Any]) -> None:
-    try:
-        # Cross-platform: resolve the CEO-Agent runtime via the shared
-        # bootstrap (BRAVO_AGENT_ROOT / ~/CEO-Agent / Windows fallback)
-        # instead of a hardcoded Windows path, so the V6 publish path is
-        # live on the Linux VPS too. Best-effort — never breaks ingestion.
-        from _bravo_bootstrap import bootstrap_bravo_path
-        if bootstrap_bravo_path() is None:
-            return
-        from core.event_bus import publish  # type: ignore
-
-        submission_id = (
-            payload.get("submission_id")
-            or payload.get("submissionID")
-            or payload.get("submission", {}).get("id")
-            or "unknown"
-        )
-        publish(
-            "SUNBIZ_LEAD_SOURCED",
-            {
-                "source": "jotform_webhook",
-                "submission_id": submission_id,
-            },
-            source="sunbiz",
-            idempotency_key=f"sunbiz:jotform:{submission_id}",
-        )
-    except Exception:
-        pass
-
-
-async def _coerce_request_payload(request: Request) -> dict[str, Any]:
-    content_type = request.headers.get("content-type", "")
-    if "application/json" in content_type:
-        body = await request.json()
-        return body if isinstance(body, dict) else {"value": body}
-    if "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
-        form = await request.form()
-        payload = dict(form)
-        if "rawRequest" in payload:
-            try:
-                decoded = json.loads(payload["rawRequest"])
-                if isinstance(decoded, dict):
-                    payload["rawRequest"] = decoded
-            except json.JSONDecodeError:
-                pass
-        return payload
-    raw = await request.body()
-    if not raw:
-        return {}
-    try:
-        decoded = json.loads(raw.decode("utf-8"))
-        return decoded if isinstance(decoded, dict) else {"value": decoded}
-    except json.JSONDecodeError:
-        return {"raw_body": raw.decode("utf-8", errors="replace")}
-
-
 @app.get("/health")
 def health(deep: bool = False) -> dict[str, Any]:
     return build_report(include_live_checks=deep)
@@ -193,18 +122,6 @@ async def sms_send(body: SMSRequest, request: Request) -> dict[str, Any]:
     if result.status == "validation_error":
         raise HTTPException(status_code=400, detail=payload)
     raise HTTPException(status_code=503, detail=payload)
-
-
-@app.post("/webhook/jotform")
-async def jotform_webhook(request: Request) -> dict[str, Any]:
-    payload = await _coerce_request_payload(request)
-    _append_webhook_log(payload, request)
-    _emit_lead_event(payload)
-    return {
-        "ok": True,
-        "queued": True,
-        "log_path": str(WEBHOOK_LOG_PATH),
-    }
 
 
 def main(argv: list[str] | None = None) -> int:
