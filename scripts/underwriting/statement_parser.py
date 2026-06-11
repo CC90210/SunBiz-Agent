@@ -195,14 +195,17 @@ _COMPANY_LIST_SENTINEL = "<<<COMPANY_LIST>>>"
 
 _EXTRACTION_PROMPT_TEMPLATE = (
     "You're analyzing a small business bank statement on behalf of an underwriter "
-    "at a funding shop. Extract a structured JSON payload describing the account activity. "
-    "Be conservative — if you're unsure about a number, omit it rather than guess.\n\n"
+    "at an MCA funding shop. Extract a structured JSON payload describing the account activity. "
+    "Be conservative — if you're unsure about a number or a classification, omit it or set "
+    "category='unknown'. The downstream grader treats 'unknown' as 'do not count' and flags "
+    "it for human review — that's the SAFE failure mode.\n\n"
     "Return JSON with these keys (omit keys whose value you can't determine confidently):\n\n"
     '{\n'
     '  "statement_period": {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"},\n'
     '  "account_holder": "<business name as it appears>",\n'
     '  "month_start_balance": <number>,\n'
     '  "month_end_balance": <number>,\n'
+    '  "lowest_daily_balance": <number>,    // SOP §2 — NSF risk indicator\n'
     '  "total_deposits": <number>,\n'
     '  "total_withdrawals": <number>,\n'
     '  "deposit_count": <int>,\n'
@@ -210,18 +213,53 @@ _EXTRACTION_PROMPT_TEMPLATE = (
     '  "nsf_events": <int>,           // count of overdrafts / NSF fees\n'
     '  "overdraft_days": <int>,       // days the account was negative\n'
     '  "average_daily_balance": <number>,\n'
+    '  "excluded_credits": [          // SOP §3 — credits that are NOT revenue\n'
+    '    {"amount": <number>, "category": "<category>", "memo": "<short memo line>"}\n'
+    '  ],\n'
+    '  "card_processor_deposits": [   // SOP §3 — real customer revenue signal\n'
+    '    {"processor": "Stripe|Square|Clover|Worldpay|TSYS|Elavon|Paya|<other>", "amount": <number>}\n'
+    '  ],\n'
     '  "recurring_debits": [          // monthly subscription-style debits\n'
     '    {"vendor": "<name>", "amount": <number>, "frequency": "monthly"}\n'
     '  ],\n'
-    '  "identified_loan_payments": [  // recurring debits that look like loan repay\n'
-    '    {"lender_hint": "<best-guess name>", "amount": <number>, "frequency": "daily|weekly|monthly"}\n'
+    '  "identified_loan_payments": [  // recurring debits that look like funder/lender repay\n'
+    '    {"lender_hint": "<best-guess name>", "amount": <number>, '
+    '"frequency": "daily|weekly|bi-weekly|monthly", "category": "<category>"}\n'
     '  ],\n'
     '  "notes": "<any underwriter-relevant observation in 1-2 sentences>"\n'
     '}\n\n'
+    "EXCLUDED_CREDITS category values (SOP §3 — these are NOT revenue and must be "
+    "captured so the grader can subtract them from total_deposits):\n"
+    "  internal_transfer   — \"Transfer from/to\", account-to-account moves\n"
+    "  mca_funding         — inbound wires from MCA funders, large round-number wires\n"
+    "  loan_advance        — \"Loan advance\", LOC draw, credit-card advance\n"
+    "  owner_injection     — personal Zelle from owner/family, \"capital contribution\"\n"
+    "  trust_inheritance   — trust distributions, estate wires\n"
+    "  refund_reversal     — \"Reversal:\", returned-item credit, chargeback reversals\n"
+    "  tax_refund          — IRS/state refunds\n"
+    "  insurance_payout    — insurer credits\n\n"
+    "IDENTIFIED_LOAN_PAYMENTS category values (SOP §4 — only mca_funder counts as a "
+    "position; mca_servicer is a DEATH-BLOW collections flag):\n"
+    "  mca_funder      — verified MCA funder from the known-companies list below, or "
+    "memo pattern-matching \"DAILY ACH FROM <FUNDER>\" / \"WEEKLY DEBIT <CORP>\". "
+    "Counts as a position.\n"
+    "  mca_servicer    — MCA SERVICING / collections / 800-number recovery firms. "
+    "Indicates a DEFAULTED MCA in collections — JUNK paper.\n"
+    "  equipment_lease — North Star, Financial Pacific, LeaseDirect, VFS Equipment. "
+    "Separate equipment-debt bucket, NOT a position.\n"
+    "  saas            — Quickbooks, ADP, Gusto, Toast, software/payroll providers.\n"
+    "  processor       — card-processor fees / batch deposits (already captured in "
+    "card_processor_deposits if a deposit).\n"
+    "  utility         — power, water, internet, phone.\n"
+    "  insurance       — business insurance premiums.\n"
+    "  auto_loan       — auto loan / vehicle financing — separate bucket.\n"
+    "  unknown         — biller name not in the known list and you can't confidently "
+    "classify it. The grader will flag for human review and NOT count it as a position.\n\n"
     "Known MCA/loan companies (look for these in memos):\n"
     f"{_COMPANY_LIST_SENTINEL}\n\n"
-    'Anything else that pattern-matches "DAILY ACH from <lender>" or '
-    '"WEEKLY DEBIT <CORP>" should also land in identified_loan_payments.\n\n'
+    "When in doubt, set category='unknown' and let the human classify. Never guess "
+    "'mca_funder' — the grader uses position count to assign grade, and a wrong "
+    "position count produces a wrong pitch and costs real money.\n\n"
     "Return ONLY the JSON. No prose before or after.\n"
 )
 

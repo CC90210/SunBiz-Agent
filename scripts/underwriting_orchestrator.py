@@ -108,20 +108,24 @@ def _supabase():
 # ─────────────────────────────────────────────────────────────────────
 
 
-def _import_submodules() -> tuple[Any, Any, Any]:
-    """Import the three underwriting submodules.
+def _import_submodules() -> tuple[Any, Any, Any, Any, Any]:
+    """Import the underwriting submodules.
 
-    Returns (parse_statement_fn, summarize_debt_fn, generate_sales_angle_fn).
-    All three are callables that raise on failure. The orchestrator wraps
-    each in a try/except so a single-module failure becomes status='error'.
+    Returns (parse_statement, summarize_debt, generate_sales_angle,
+             grade_deal, build_metric_card). All callables that raise on
+    failure; the orchestrator wraps each in try/except so a single-module
+    failure becomes status='error'.
+
+    2026-06-11: added grader.py (Adon MCA SOP §6/§7 grading + metric card).
     """
     sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
     from underwriting.statement_parser import parse_statement  # type: ignore
     from underwriting.debt_detector import summarize_debt      # type: ignore
     from underwriting.sales_angle import generate_sales_angle  # type: ignore
+    from underwriting.grader import grade_deal, build_metric_card  # type: ignore
 
-    return parse_statement, summarize_debt, generate_sales_angle
+    return parse_statement, summarize_debt, generate_sales_angle, grade_deal, build_metric_card
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -386,7 +390,13 @@ def _process_row(sb, row: dict) -> None:
 
     # ── 2. Import pipeline modules ────────────────────────────────────
     try:
-        parse_statement, summarize_debt, generate_sales_angle = _import_submodules()
+        (
+            parse_statement,
+            summarize_debt,
+            generate_sales_angle,
+            grade_deal,
+            build_metric_card,
+        ) = _import_submodules()
     except Exception as exc:
         _log(f"underwriting[{row_id}]: submodule import failed: {exc}")
         _fail(sb, row_id, f"Submodule import failed: {exc!s:.300}")
@@ -435,19 +445,53 @@ def _process_row(sb, row: dict) -> None:
     except Exception:
         app_data = {}
 
-    # ── 6. Sales angle ───────────────────────────────────────────────
+    # ── 6. Adon MCA SOP grading — A/B/C/D/JUNK + sales metric card ───
+    # SOP §§3,5,6,7. Computes TRUE revenue (deposits minus excluded
+    # credits), verified positions (mca_funder only — collections = JUNK
+    # override), leverage, grade, recommendation, and the sales-focused
+    # metric card the operator's Underwriting tab renders. Best-effort:
+    # falls back to a {grade: null} stub on any exception so the rest of
+    # the pipeline keeps writing.
     try:
+        grading = grade_deal(parser_outputs, debt_analysis)
+        metric_card = build_metric_card(grading)
+    except Exception as exc:
+        _log(f"underwriting[{row_id}]: grading failed (non-fatal): {exc}")
+        grading = {"grade": None, "recommendation": None, "error": str(exc)[:300]}
+        metric_card = {"grade": None, "recommendation": None, "error": str(exc)[:300]}
+
+    # Stuff grading + metric_card into debt_analysis so the dashboard
+    # surfaces them without waiting on a new application_underwriting
+    # column (transitional shape; migration adds a top-level grading
+    # column when the dashboard renders the metric card UI).
+    debt_analysis = dict(debt_analysis)
+    debt_analysis["grading"] = grading
+    debt_analysis["metric_card"] = metric_card
+
+    # ── 7. Sales angle (now informed by grading) ─────────────────────
+    try:
+        # Pass grading along so sales_angle can lean on the grade +
+        # recommendation when shaping the pitch — but stay tolerant of
+        # the existing 2-arg signature for back-compat with the file
+        # that ships sales_angle.
         sales_angle = generate_sales_angle(app_data, debt_analysis)
     except Exception as exc:
-        # Non-fatal: we still have the structured analysis; angle is a
+        # Non-fatal: structured analysis still lands; angle is a
         # nice-to-have the operator can regenerate.
         _log(f"underwriting[{row_id}]: sales_angle generation failed (non-fatal): {exc}")
         sales_angle = f"(generation failed: {exc!s:.200})"
 
-    # ── 7. Derive metrics + risk ──────────────────────────────────────
+    # ── 8. Derive metrics + risk ──────────────────────────────────────
     metrics = _derive_metrics(parser_outputs, debt_analysis)
     risk_flags = _compute_risk_flags(metrics, parser_outputs)
     readiness_score = _compute_readiness_score(risk_flags, metrics)
+
+    # SOP-aware risk flag: any JUNK grade is a hard "don't shop" signal
+    # that should appear on the dashboard alongside the readiness score.
+    if grading.get("grade") == "JUNK":
+        risk_flags.append("junk_paper")
+    if grading.get("collections_flag"):
+        risk_flags.append("mca_collections")
 
     # ── 8. Persist complete row ───────────────────────────────────────
     update_payload: dict[str, Any] = {
