@@ -337,21 +337,30 @@ def _process_row(sb, row: dict) -> None:
     # documents — cross-deal data leak risk. Fix: include FK columns in SELECT and move
     # the scope filter to a server-side WHERE clause. Fail closed — never fall back to
     # all-tenant documents.
+    # 2026-06-11: lead_documents has NO application_id / parent_id column —
+    # its real schema keys documents off lead_id only (id, tenant_id,
+    # lead_id, storage_path, doc_type, ...). The prior SELECT referenced
+    # those nonexistent columns, so the query 42703'd and EVERY run failed
+    # at doc lookup. Under the shared-id model the dashboard stores an
+    # application's bank statements with lead_id == the application's own id,
+    # so the primary lookup filters lead_documents.lead_id == application_id.
+    # The fallback covers rows stored under the application's distinct
+    # data->lead_id (older split-id records).
     try:
-        # Primary path: filter by application_id directly on the server.
+        # Primary path: docs attached under the application's own id.
         doc_rows = (
             sb.table("lead_documents")
-            .select("id, storage_path, doc_type, application_id, lead_id, parent_id")
+            .select("id, storage_path, doc_type, lead_id")
             .eq("tenant_id", tenant_id)
-            .eq("application_id", application_id)
+            .eq("lead_id", application_id)
             .in_("doc_type", ["bank_statements_3mo", "bank_statement"])
             .execute()
         )
         docs = doc_rows.data or []
 
         if not docs:
-            # Fallback path: resolve via parent lead_id for older rows that store
-            # the lead reference instead of the application reference.
+            # Fallback path: resolve the application's distinct parent lead_id
+            # (split-id records) and look there.
             app_lead_row = (
                 sb.table("tenant_records")
                 .select("data->lead_id")
@@ -361,11 +370,11 @@ def _process_row(sb, row: dict) -> None:
                 .maybe_single()
                 .execute()
             )
-            parent_lead_id = (app_lead_row.data or {}).get("lead_id") if app_lead_row.data else None
-            if parent_lead_id:
+            parent_lead_id = (app_lead_row.data or {}).get("lead_id") if (app_lead_row and app_lead_row.data) else None
+            if parent_lead_id and parent_lead_id != application_id:
                 fallback_rows = (
                     sb.table("lead_documents")
-                    .select("id, storage_path, doc_type, application_id, lead_id, parent_id")
+                    .select("id, storage_path, doc_type, lead_id")
                     .eq("tenant_id", tenant_id)
                     .eq("lead_id", parent_lead_id)
                     .in_("doc_type", ["bank_statements_3mo", "bank_statement"])
