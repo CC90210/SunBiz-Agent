@@ -39,6 +39,31 @@ from pathlib import Path
 from typing import Any, Callable
 
 
+def _kick_orchestrator_once() -> None:
+    """Spawn a detached one-shot orchestrator tick so a freshly enqueued
+    run starts processing now instead of waiting for the */15 cron tick
+    (the dashboard's Re-run promises seconds, not minutes). The sleep
+    clears PENDING_GRACE_SECONDS (5s) so the tick's claim cutoff covers
+    the row this tool just inserted. Best-effort: on any failure the
+    cron remains the backstop worker."""
+    import shlex
+    import subprocess
+    script_dir = Path(__file__).resolve().parent
+    orchestrator = script_dir / "underwriting_orchestrator.py"
+    venv_py = script_dir.parent / ".venv" / "bin" / "python"
+    py = str(venv_py) if venv_py.exists() else sys.executable
+    cmd = f"sleep 6 && exec {shlex.quote(py)} {shlex.quote(str(orchestrator))} once"
+    try:
+        subprocess.Popen(
+            ["/bin/sh", "-c", cmd],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception:
+        pass
+
+
 def underwriting_run(
     payload: dict,
     _ok: Callable[[str], dict],
@@ -112,6 +137,10 @@ def underwriting_run(
     )
     if in_flight and in_flight.data:
         existing_run_id = in_flight.data["id"]
+        # A stuck/stale pending row (pre-dispatch-fix insert, or a cron
+        # gap) gets a worker tick too — reuse + kick is idempotent since
+        # the claim is an atomic UPDATE...RETURNING.
+        _kick_orchestrator_once()
         if not wait_for_complete:
             return _ok(json.dumps({
                 "ok": True,
@@ -137,6 +166,7 @@ def underwriting_run(
         if not ins.data or not ins.data[0].get("id"):
             return _err(f"failed to enqueue underwriting run: {getattr(ins, 'error', 'unknown')}")
         run_id = ins.data[0]["id"]
+        _kick_orchestrator_once()
 
     if not wait_for_complete:
         return _ok(json.dumps({
