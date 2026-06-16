@@ -426,6 +426,28 @@ def _bridge_bearer() -> str:
         return ""
 
 
+def _resolve_application_for_lead(sb, tenant_id: str, lead_id: str) -> Optional[str]:
+    """Most-recent application record linked to this lead (tenant_records
+    entity_type='application', data->>lead_id == lead_id). Returns the
+    application id, or None when the lead has no application yet."""
+    try:
+        r = (
+            sb.table("tenant_records")
+            .select("id")
+            .eq("tenant_id", tenant_id)
+            .eq("entity_type", "application")
+            .filter("data->>lead_id", "eq", lead_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = r.data or []
+        return rows[0]["id"] if rows else None
+    except Exception as e:
+        _log(f"underwriting_auto: application lookup failed lead={lead_id}: {e}")
+        return None
+
+
 def _fire_underwriting_auto(sb, tenant_id: str, application_id: str) -> bool:
     """Application hit status='submitted' — enqueue the underwriting chain
     (statement_parser → debt_detector → sales_angle) via the local bridge's
@@ -548,18 +570,38 @@ def enrollment_tick(sb) -> int:
                         f"lead={form_lead_id} form={form_id}"
                     )
 
-        # Underwriting auto-fire — application transitioned to 'submitted'
-        # (operator uploaded bank statements via the drawer). Runs before
-        # the drip lookup so a drip_sequences read failure can't skip it.
+        # Underwriting auto-fire — the merchant finished submitting their file,
+        # so the bank statements are in and underwriting can run without the
+        # operator clicking Underwrite. Two terminal LEAD stages reach here:
+        #   - 'signed_application' — completed the full-application form (the 3
+        #     statements are uploaded in the documents step before signature).
+        #   - 'submitted' — completed the lightweight bank-statement-upload form.
+        # Resolve the application linked to that lead and enqueue underwriting.
+        #
+        # Previously keyed on entity='application' + to='submitted' — but
+        # 'submitted' is a LEAD stage, never an application status (0/100
+        # applications ever reached it), so that branch never fired. Re-pointed
+        # to the real terminal LEAD events 2026-06-16. Runs before the drip
+        # lookup so a drip_sequences read failure can't skip it.
+        # _fire_underwriting_auto is idempotent (24h dedup + bridge in-flight
+        # reuse), so a re-submit can't double-run.
         if (
             event_type == "BRAVO_RECORD_STATUS_CHANGED"
-            and payload.get("entity") == "application"
-            and str(payload.get("field") or "").lower() in ("status", "stage")
-            and str(payload.get("to") or "").strip().lower() == "submitted"
+            and payload.get("entity") == "lead"
+            and str(payload.get("field") or "").lower() == "stage"
+            and str(payload.get("to") or "").strip().lower()
+            in ("signed_application", "submitted")
         ):
-            uw_app_id = payload.get("record_id")
-            if uw_app_id:
-                _fire_underwriting_auto(sb, tenant_id, uw_app_id)
+            uw_lead_id = payload.get("record_id") or payload.get("lead_id")
+            if uw_lead_id:
+                uw_app_id = _resolve_application_for_lead(sb, tenant_id, uw_lead_id)
+                if uw_app_id:
+                    _fire_underwriting_auto(sb, tenant_id, uw_app_id)
+                else:
+                    _log(
+                        f"underwriting_auto: lead={uw_lead_id} reached "
+                        f"signed_application but no application row found"
+                    )
 
         # Find active sequences for this tenant + event_type. Tenant
         # isolation is handled at the row level via tenant_id match —
@@ -619,6 +661,37 @@ def _backoff_seconds(attempt_count: int) -> int:
     return min(sec, BACKOFF_MAX_SECONDS)
 
 
+def _derive_lead_aliases(lead: dict) -> None:
+    """In-place: add drip-template aliases so {{lead.first_name}},
+    {{lead.name}}, {{lead.company}}, {{lead.state}} resolve from the
+    canonical SunBiz lead fields. Forms persist contact_name +
+    business_name (+ business_state on the full app), NOT first_name /
+    company / state — without these aliases the Inquiry Welcomer drip
+    rendered "Hi , ... funding for ." (blank name + company).
+
+    Fill-only: never overwrites a value the lead already carries (a
+    CSV-imported lead may set first_name directly), and treats an
+    empty string as absent so a blank stored value still gets derived.
+    """
+    def _src(*keys: str) -> Optional[str]:
+        for k in keys:
+            v = lead.get(k)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+        return None
+
+    def _fill(dst: str, value: Optional[str]) -> None:
+        cur = lead.get(dst)
+        if value and not (isinstance(cur, str) and cur.strip()):
+            lead[dst] = value
+
+    full = _src("contact_name", "full_name", "name")
+    _fill("name", full)
+    _fill("first_name", full.split()[0] if full else None)
+    _fill("company", _src("business_name", "company"))
+    _fill("state", _src("business_state", "state"))
+
+
 def _build_context(sb, tenant_id: str, lead_id: str, payload: dict) -> dict:
     """Assemble the template context for a single send. Includes the
     lead row (joined from tenant_records) + the original triggering
@@ -635,7 +708,9 @@ def _build_context(sb, tenant_id: str, lead_id: str, payload: dict) -> dict:
             .execute()
         )
         if lead_row.data:
-            ctx["lead"] = lead_row.data.get("data") or {}
+            lead_data = lead_row.data.get("data") or {}
+            _derive_lead_aliases(lead_data)
+            ctx["lead"] = lead_data
     except Exception as e:
         _log(f"context: lead lookup failed lead={lead_id}: {e}")
         ctx["lead"] = {}
@@ -722,6 +797,23 @@ def _send_step(sb, state_row: dict, sequence: dict) -> dict:
         return {"outcome": "permanent", "detail": "lead has no email on file"}
     if channel == "sms" and not to_phone:
         return {"outcome": "permanent", "detail": "lead has no phone on file"}
+
+    # Don't ship a touch whose CTA link would render blank. The Inquiry
+    # Welcomer's SMS + email embed {{lead.application_url}}; a lead that never
+    # got a minted full-application link — a CSV/manual lead promoted to
+    # hot_lead, or a lead created while the full-application form was disabled —
+    # would otherwise receive "Apply here:  — takes 5 min" with a dead href.
+    # Skip permanently so the operator sees the gap rather than the merchant.
+    needs_app_url = "lead.application_url" in (
+        body_template + " " + body_html_template + " " + subject_template
+    )
+    if needs_app_url:
+        app_url = lead.get("application_url")
+        if not (isinstance(app_url, str) and app_url.strip()):
+            return {
+                "outcome": "permanent",
+                "detail": "step needs application_url but lead has none — skipped to avoid a dead link",
+            }
 
     # SunBiz directive 2026-05-31: under the shared-inbox From: model,
     # the assigned rep stays on the drip thread by being CC'd on each
