@@ -4,7 +4,7 @@ Part of the SunBiz second-meeting (2026-05-25) expansion.
 Migration dependency: 069 (adds follow_up_tasks table to tenant schema).
 
 Reads:
-  - tenant_records where entity_type='lead' (hot_lead / missing_info / follow_ups stage)
+  - tenant_records where entity_type='lead' (intent_inquiry_submitted / hot_lead / missing_info / follow_ups stage)
   - tenant_records where entity_type='application' (application_in / shopping /
     missing_info / requested_docs / docs_out status)
   - follow_up_tasks (to avoid double-creating for same lead on same calendar day)
@@ -58,7 +58,10 @@ BRAVO_ROOT = bootstrap_bravo_path()
 DAEMON_NAME = "follow_up_generator"
 
 # Leads in these stages that haven't been contacted in LEAD_STALE_DAYS get a task.
-STALE_LEAD_STAGES = {"hot_lead", "missing_info", "follow_ups"}
+# intent_inquiry_submitted (2026-06-17) is the new first stage for form-submit
+# inquiries — a brand-new inquiry with no contact yet is exactly something the
+# operator should follow up on, so it's an active early-funnel stage alongside hot_lead.
+STALE_LEAD_STAGES = {"intent_inquiry_submitted", "hot_lead", "missing_info", "follow_ups"}
 LEAD_STALE_DAYS = 3
 
 # Applications in these statuses that haven't progressed in APP_STUCK_DAYS get a task.
@@ -67,6 +70,7 @@ APP_STUCK_DAYS = 5
 
 # Reason mapping from lead stage → task reason
 _STAGE_REASON: dict[str, str] = {
+    "intent_inquiry_submitted": "stalled",  # new inquiry sitting uncontacted → nudge
     "hot_lead": "stalled",
     "missing_info": "missing_info",
     "follow_ups": "no_response",

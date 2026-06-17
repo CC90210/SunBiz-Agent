@@ -19,6 +19,7 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from apply_migration import load_env  # noqa: E402
 
 VISIBLE_LEAD_STAGES = {
+    "intent_inquiry_submitted",  # 2026-06-17: new first stage for form-submit inquiries
     "hot_lead", "missing_info", "follow_up", "sent_application",
     "viewed_application", "signed_application", "submitted",
     "declined", "default",
