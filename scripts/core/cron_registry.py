@@ -73,7 +73,7 @@ SUNBIZ_TENANT_SLUG = "submissions"  # routed as "sun" by resolveClientProfileSlu
 # bravo and the cron fails with "script not found" every tick.
 SEED_JOBS: list[dict] = [
     {
-        "agent_key": "solara",
+        "agent_key": "helios",
         "name": "SunBiz Follow-up Generator",
         "description": (
             "Daily 6am ET: generates follow_up_tasks for stuck / "
@@ -84,6 +84,23 @@ SEED_JOBS: list[dict] = [
         "action_type": "script_run",
         "action_payload": {
             "script": "scripts/follow_up_generator.py",
+            "args": ["once"],
+            "root": "sunbiz",
+        },
+        "enabled": True,
+    },
+    {
+        "agent_key": "helios",
+        "name": "SunBiz Cold Outreach Runner",
+        "description": (
+            "Every 15 min: drains active cold_outreach_campaigns, fires due "
+            "recipient steps via send_gateway (CASL + suppression + daily "
+            "cap). Opt-outs marked unsubscribed."
+        ),
+        "schedule": "*/15 * * * *",
+        "action_type": "script_run",
+        "action_payload": {
+            "script": "scripts/cold_outreach_runner.py",
             "args": ["once"],
             "root": "sunbiz",
         },
