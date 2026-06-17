@@ -129,8 +129,8 @@ SEED_JOBS: list[dict] = [
         "name": "SunBiz Renewal Reminder",
         "description": (
             "Daily 9am ET: scans funded deals at 40-50% through term, "
-            "pushes Telegram alert + writes "
-            "daily_plan_items.category=renewal_eligible. Honors per-tenant "
+            "writes daily_plan_items.category=renewal_eligible (shown on "
+            "the Daily Plan). Honors per-tenant "
             "renewal_eligibility_threshold_pct manifest setting (default 40)."
         ),
         "schedule": "0 9 * * *",
