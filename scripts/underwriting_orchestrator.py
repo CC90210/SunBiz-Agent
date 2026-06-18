@@ -347,6 +347,118 @@ def _compute_readiness_score(
 
 
 # ─────────────────────────────────────────────────────────────────────
+# Data-only underwriting (no parsable statements) — CC 2026-06-18
+# ─────────────────────────────────────────────────────────────────────
+
+
+def _num(v: Any) -> float:
+    """Parse a possibly-string currency/number to float; 0.0 on failure."""
+    try:
+        return float(str(v).replace("$", "").replace(",", "").strip())
+    except Exception:
+        return 0.0
+
+
+def _provisional_grade_from_self_report(
+    monthly_rev: float, app_data: dict
+) -> tuple[str | None, str]:
+    """A conservative, clearly-UNVERIFIED grade from self-reported signals only
+    (no statements). Real grading needs statements; this keeps the deal movable
+    and honestly labeled."""
+    if monthly_rev <= 0:
+        return None, (
+            "No bank statements AND no stated monthly revenue on file — add a "
+            "revenue figure or upload statements to assess."
+        )
+    tib = _num(app_data.get("time_in_business_months"))
+    fico = _num(app_data.get("applicant_fico") or app_data.get("fico"))
+    pts = 0
+    pts += 2 if monthly_rev >= 50_000 else 1 if monthly_rev >= 15_000 else 0
+    pts += 1 if tib >= 24 else 0
+    pts += 1 if fico >= 650 else 0
+    grade = "B" if pts >= 3 else "C" if pts >= 1 else "D"
+    return grade, (
+        "PROVISIONAL (self-reported, unverified) — upload 3 months of bank "
+        "statements to confirm revenue, NSF, debt + positions before shopping."
+    )
+
+
+def _data_only_grading(
+    app_data: dict, reason: str, build_metric_card
+) -> tuple[dict, dict]:
+    """Build (grading, metric_card) from SELF-REPORTED application data when no
+    parsable statements exist. Same shape as grader.grade_deal so
+    build_metric_card + the dashboard render it identically; flagged
+    data_only/unverified so underwriting is never a dead-end."""
+    monthly_rev = _num(app_data.get("monthly_revenue") or app_data.get("avg_monthly_revenue"))
+    positions = int(_num(app_data.get("position_count")))
+    tib_raw = app_data.get("time_in_business_months")
+    try:
+        tib = int(tib_raw) if tib_raw is not None else None
+    except (TypeError, ValueError):
+        tib = None
+    grade, recommendation = _provisional_grade_from_self_report(monthly_rev, app_data)
+    banner = (
+        "DATA-ONLY: no bank statements parsed — revenue + risk are merchant "
+        "SELF-REPORTED and UNVERIFIED. Upload 3 months of statements for a "
+        "verified analysis (true revenue, NSF, debt, positions)."
+    )
+    grading = {
+        "grade": grade,
+        "recommendation": recommendation,
+        "target_lender_tier": None,
+        "true_monthly_revenue": monthly_rev,
+        "excluded_credits_monthly": 0.0,
+        "revenue_estimation": "self_reported_unverified",
+        "active_mca_positions": positions,
+        "mca_monthly_burden": 0.0,
+        "mca_leverage": None,
+        "estimated_total_mca_balance": 0.0,
+        "estimate_quality": "self_reported",
+        "nsfs_window_total": 0,
+        "nsfs_per_month_avg": 0.0,
+        "negative_balance_days": 0,
+        "collections_flag": False,
+        "equipment_lease_count": 0,
+        "positions_verified": [],
+        "red_flags": [banner],
+        "unknown_biller_flags": [],
+        "gross_deposits_total": monthly_rev,
+        "positioning_merchant_safe": None,
+        "grade_justification": "Graded on self-reported application data only (no bank statements).",
+        "proposed_play": None,
+        "collections": [],
+        "other_debt": [],
+        "avg_daily_balance": None,
+        "time_in_business_months": tib,
+        "data_source": "self_reported_no_statements",
+        "review_period": {"months": 0},
+        "confidence_notes": [banner, f"Reason: {reason}."],
+        "data_only": True,
+        "data_only_reason": reason,
+    }
+    metric_card = build_metric_card(grading)
+    metric_card["data_only"] = True
+    metric_card["revenue_note"] = "self-reported (no statements) — unverified"
+    return grading, metric_card
+
+
+def _data_only_metrics(app_data: dict) -> dict[str, Any]:
+    """Scalar metric columns for the data-only path — self-reported revenue,
+    everything statement-derived left None/0 (honest about what's unknown)."""
+    monthly_rev = _num(app_data.get("monthly_revenue") or app_data.get("avg_monthly_revenue"))
+    return {
+        "avg_monthly_revenue": monthly_rev if monthly_rev > 0 else None,
+        "avg_daily_balance": None,
+        "nsf_count": 0,
+        "deposit_consistency_pct": None,
+        "debt_service_monthly": None,
+        "debt_to_revenue_ratio": None,
+        "lender_count": int(_num(app_data.get("position_count"))),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────
 # Main processing logic for one row
 # ─────────────────────────────────────────────────────────────────────
 
@@ -360,6 +472,24 @@ def _process_row(sb, row: dict) -> None:
     row_id = row["id"]
     application_id = row["application_id"]
     tenant_id = row["tenant_id"]
+
+    # ── 0. Application snapshot — loaded EARLY because BOTH the statement
+    # path AND the data-only fallback (no parsable statements) need the
+    # merchant's self-reported financials. (2026-06-18, CC: underwriting must
+    # always run, even with zero documents.)
+    try:
+        _app_row = (
+            sb.table("tenant_records")
+            .select("data")
+            .eq("tenant_id", tenant_id)
+            .eq("entity_type", "application")
+            .eq("id", application_id)
+            .maybe_single()
+            .execute()
+        )
+        app_data: dict = (_app_row.data or {}).get("data") or {}
+    except Exception:
+        app_data = {}
 
     # ── 1. Find bank statement documents ──────────────────────────────
     # Codex 2026-05-25 P0 finding: prior SELECT omitted application_id/lead_id/parent_id,
@@ -451,13 +581,10 @@ def _process_row(sb, row: dict) -> None:
         _fail(sb, row_id, f"Document lookup failed: {exc!s:.400}")
         return
 
-    if not docs:
-        _fail(
-            sb, row_id,
-            "No bank statements found for this application (checked application_id + lead_id paths) — "
-            "upload via Underwriting tab first."
-        )
-        return
+    # No statements found is NOT fatal any more (CC 2026-06-18) — we fall back
+    # to a data-only underwriting from the application's self-reported data
+    # below. `docs` may be empty here; the parse loop then yields no
+    # parser_outputs and the data-only branch runs.
 
     # ── 2. Import pipeline modules ────────────────────────────────────
     try:
@@ -490,88 +617,72 @@ def _process_row(sb, row: dict) -> None:
             _log(f"underwriting[{row_id}]: parse failed for {local_path.name}: {exc}")
             # Non-fatal per-file: keep processing other statements.
 
-    if not parser_outputs:
-        _fail(sb, row_id, "All bank statement PDFs failed to parse — check uploads.")
-        return
-
-    # ── 4. Debt analysis ─────────────────────────────────────────────
-    try:
-        debt_analysis = summarize_debt(parser_outputs)
-    except Exception as exc:
-        _fail(sb, row_id, f"Debt analysis failed: {exc!s:.400}")
-        return
-
-    # ── 5. Application snapshot for sales angle + grading context ─────
-    try:
-        app_row = (
-            sb.table("tenant_records")
-            .select("data")
-            .eq("tenant_id", tenant_id)
-            .eq("entity_type", "application")
-            .eq("id", application_id)
-            .maybe_single()
-            .execute()
+    # ── 4-8. Underwrite. Statement-based when we have parsed statements;
+    # otherwise a DATA-ONLY assessment from the merchant's self-reported
+    # application data. CC 2026-06-18: underwriting is ALWAYS functional — 1, 2,
+    # or 3 statements, or none. With no parsable statements we still produce a
+    # clearly-UNVERIFIED report from stated monthly revenue + form info so the
+    # operator is never blocked; uploading statements upgrades it to a verified
+    # analysis. app_data was loaded up front (step 0) — both paths use it.
+    if parser_outputs:
+        # ── Statement-based path (the full SOP pipeline) ──
+        try:
+            debt_analysis = summarize_debt(parser_outputs)
+        except Exception as exc:
+            _log(f"underwriting[{row_id}]: debt analysis failed (non-fatal): {exc}")
+            debt_analysis = {}
+        data_source = "upload"
+        # SOP §§3,5,6,7 grading — TRUE revenue, verified positions, leverage,
+        # grade + the sales metric card. Best-effort: a {grade: null} stub on
+        # any exception so the row still completes.
+        try:
+            grading = grade_deal(
+                parser_outputs,
+                debt_analysis,
+                app_data=app_data,
+                data_source=data_source,
+            )
+            metric_card = build_metric_card(grading)
+        except Exception as exc:
+            _log(f"underwriting[{row_id}]: grading failed (non-fatal): {exc}")
+            grading = {"grade": None, "recommendation": None, "error": str(exc)[:300]}
+            metric_card = {"grade": None, "recommendation": None, "error": str(exc)[:300]}
+        debt_analysis = dict(debt_analysis)
+        debt_analysis["grading"] = grading
+        debt_analysis["metric_card"] = metric_card
+        metrics = _derive_metrics(parser_outputs, debt_analysis)
+        risk_flags = _compute_risk_flags(metrics, parser_outputs)
+        readiness_score = _compute_readiness_score(risk_flags, metrics)
+        # SOP-aware risk flag: any JUNK grade is a hard "don't shop" signal.
+        if grading.get("grade") == "JUNK":
+            risk_flags.append("junk_paper")
+        if grading.get("collections_flag"):
+            risk_flags.append("mca_collections")
+    else:
+        # ── Data-only path (no parsable statements — never a dead-end) ──
+        reason = "no_documents" if not docs else "all_statements_failed_parse"
+        _log(
+            f"underwriting[{row_id}]: no parsable statements ({reason}) — "
+            f"running DATA-ONLY underwriting from self-reported application data"
         )
-        app_data: dict = (app_row.data or {}).get("data") or {}
-    except Exception:
-        app_data = {}
+        grading, metric_card = _data_only_grading(app_data, reason, build_metric_card)
+        debt_analysis = {
+            "data_only": True,
+            "data_only_reason": reason,
+            "grading": grading,
+            "metric_card": metric_card,
+        }
+        metrics = _data_only_metrics(app_data)
+        risk_flags = ["data_only_no_statements"]
+        readiness_score = _compute_readiness_score(risk_flags, metrics)
 
-    # Provenance for the metric card (SOP — show provenance): statements
-    # enter as uploaded PDF documents via lead_documents.
-    data_source = "upload"
-
-    # ── 6. Adon MCA SOP grading — A/B/C/D/JUNK + sales metric card ───
-    # SOP §§3,5,6,7. Computes TRUE revenue (deposits minus excluded
-    # credits), verified positions (mca_funder only — collections = JUNK
-    # override), leverage, grade, recommendation, and the sales-focused
-    # metric card the operator's Underwriting tab renders. Best-effort:
-    # falls back to a {grade: null} stub on any exception so the rest of
-    # the pipeline keeps writing.
+    # ── Sales angle (both paths — informed by grading where present) ──
     try:
-        grading = grade_deal(
-            parser_outputs,
-            debt_analysis,
-            app_data=app_data,
-            data_source=data_source,
-        )
-        metric_card = build_metric_card(grading)
-    except Exception as exc:
-        _log(f"underwriting[{row_id}]: grading failed (non-fatal): {exc}")
-        grading = {"grade": None, "recommendation": None, "error": str(exc)[:300]}
-        metric_card = {"grade": None, "recommendation": None, "error": str(exc)[:300]}
-
-    # Stuff grading + metric_card into debt_analysis so the dashboard
-    # surfaces them without waiting on a new application_underwriting
-    # column (transitional shape; migration adds a top-level grading
-    # column when the dashboard renders the metric card UI).
-    debt_analysis = dict(debt_analysis)
-    debt_analysis["grading"] = grading
-    debt_analysis["metric_card"] = metric_card
-
-    # ── 7. Sales angle (now informed by grading) ─────────────────────
-    try:
-        # Pass grading along so sales_angle can lean on the grade +
-        # recommendation when shaping the pitch — but stay tolerant of
-        # the existing 2-arg signature for back-compat with the file
-        # that ships sales_angle.
         sales_angle = generate_sales_angle(app_data, debt_analysis)
     except Exception as exc:
-        # Non-fatal: structured analysis still lands; angle is a
-        # nice-to-have the operator can regenerate.
+        # Non-fatal: structured analysis still lands; the angle can be regenerated.
         _log(f"underwriting[{row_id}]: sales_angle generation failed (non-fatal): {exc}")
         sales_angle = f"(generation failed: {exc!s:.200})"
-
-    # ── 8. Derive metrics + risk ──────────────────────────────────────
-    metrics = _derive_metrics(parser_outputs, debt_analysis)
-    risk_flags = _compute_risk_flags(metrics, parser_outputs)
-    readiness_score = _compute_readiness_score(risk_flags, metrics)
-
-    # SOP-aware risk flag: any JUNK grade is a hard "don't shop" signal
-    # that should appear on the dashboard alongside the readiness score.
-    if grading.get("grade") == "JUNK":
-        risk_flags.append("junk_paper")
-    if grading.get("collections_flag"):
-        risk_flags.append("mca_collections")
 
     # ── 8. Persist complete row ───────────────────────────────────────
     update_payload: dict[str, Any] = {
