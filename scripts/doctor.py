@@ -44,7 +44,7 @@ FRIENDLY_CHECK_NAMES = {
     "env_template": "Credentials template",
     "env_file": "Credentials file",
     "repo_surface": "Runtime files",
-    "sms_phase1_env": "Text Torrent credentials",
+    "sms_phase1_env": "Twilio SMS (optional failover)",
     "gmail_env": "Email credentials",
     "api_security_env": "Hosted API signing secret",
     "sms_phase2_failover_env": "Phase 2 SMS failover",
@@ -209,6 +209,12 @@ def build_report(*, include_live_checks: bool = False) -> dict:
             )
         )
 
+    # Twilio is an OPTIONAL SMS failover for SunBiz — the ACTIVE outbound SMS
+    # stack is Kixie + TextTorrent, configured per-tenant in the dashboard
+    # (tenant_integration_credentials), NOT in .env.agents. So a missing Twilio
+    # key is a WARN, not a FAIL: it must never drag the verdict to UNHEALTHY on a
+    # Kixie/TextTorrent-only deploy (the real production reality). SMS-provider
+    # readiness is verified in the dashboard Settings panel, not here. (2026-06-18.)
     checks.append(
         check_key_group(
             "sms_phase1_env",
@@ -218,7 +224,8 @@ def build_report(*, include_live_checks: bool = False) -> dict:
                 "SUNBIZ_TWILIO_FROM_NUMBER",
             ),
             env,
-            required=True,
+            required=False,
+            missing_message="Twilio not configured (optional failover) — active SMS is Kixie/TextTorrent via the dashboard",
         )
     )
     checks.append(
@@ -280,22 +287,30 @@ def build_report(*, include_live_checks: bool = False) -> dict:
         sms = sms_status()
         configured = ", ".join(sms.get("providers_configured", [])) or "(none)"
         sdk_installed = bool(sms.get("twilio_sdk_installed"))
-        sms_ok = "twilio" in sms.get("providers_configured", []) and sdk_installed
+        twilio_ready = "twilio" in sms.get("providers_configured", []) and sdk_installed
+        # sms_engine.py only tracks the OPTIONAL Twilio failover. The ACTIVE SMS
+        # stack (Kixie + TextTorrent) is dashboard-configured + dispatched by
+        # send_gateway, so "no Twilio provider here" is a WARN, not a FAIL —
+        # it must not pull the verdict to UNHEALTHY. (2026-06-18.)
         checks.append(
             Check(
                 name="sms_engine",
-                status="ok" if sms_ok else "fail",
-                detail=f"providers={configured}; twilio_sdk_installed={sdk_installed}",
-                required=True,
+                status="ok" if twilio_ready else "warn",
+                detail=(
+                    f"twilio failover: providers={configured}; "
+                    f"twilio_sdk_installed={sdk_installed} "
+                    f"(active SMS = Kixie/TextTorrent via dashboard)"
+                ),
+                required=False,
             )
         )
     except Exception as exc:  # noqa: BLE001
         checks.append(
             Check(
                 name="sms_engine",
-                status="fail",
-                detail=f"sms_engine import failed: {str(exc)[:200]}",
-                required=True,
+                status="warn",
+                detail=f"sms_engine (twilio failover) import failed: {str(exc)[:200]}",
+                required=False,
             )
         )
 
