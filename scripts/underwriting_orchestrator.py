@@ -439,7 +439,7 @@ def _process_row(sb, row: dict) -> None:
         _fail(sb, row_id, f"Debt analysis failed: {exc!s:.400}")
         return
 
-    # ── 5. Application snapshot for sales angle ───────────────────────
+    # ── 5. Application snapshot for sales angle + grading context ─────
     try:
         app_row = (
             sb.table("tenant_records")
@@ -454,6 +454,10 @@ def _process_row(sb, row: dict) -> None:
     except Exception:
         app_data = {}
 
+    # Provenance for the metric card (SOP — show provenance): statements
+    # enter as uploaded PDF documents via lead_documents.
+    data_source = "upload"
+
     # ── 6. Adon MCA SOP grading — A/B/C/D/JUNK + sales metric card ───
     # SOP §§3,5,6,7. Computes TRUE revenue (deposits minus excluded
     # credits), verified positions (mca_funder only — collections = JUNK
@@ -462,7 +466,12 @@ def _process_row(sb, row: dict) -> None:
     # falls back to a {grade: null} stub on any exception so the rest of
     # the pipeline keeps writing.
     try:
-        grading = grade_deal(parser_outputs, debt_analysis)
+        grading = grade_deal(
+            parser_outputs,
+            debt_analysis,
+            app_data=app_data,
+            data_source=data_source,
+        )
         metric_card = build_metric_card(grading)
     except Exception as exc:
         _log(f"underwriting[{row_id}]: grading failed (non-fatal): {exc}")

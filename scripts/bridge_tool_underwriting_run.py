@@ -73,6 +73,10 @@ def underwriting_run(
     so result framing matches the rest of the tool surface."""
     application_id = str(payload.get("application_id") or "").strip()
     triggered_by = str(payload.get("triggered_by") or "manual").strip()
+    # auth_user_id of the operator who kicked this run. Persisted on the
+    # row so the dashboard resolves it to the operator's NAME — never show
+    # the raw triggered_by enum ('manual'/'automatic') where a user reads it.
+    triggered_by_user_id = str(payload.get("triggered_by_user_id") or "").strip() or None
     wait_for_complete = bool(payload.get("wait_for_complete", True))
     poll_interval_s = max(1, min(int(payload.get("poll_interval_s") or 5), 60))
     poll_timeout_s = max(60, min(int(payload.get("poll_timeout_s") or 1800), 3600))
@@ -159,6 +163,7 @@ def underwriting_run(
                 "application_id": application_id,
                 "status": "pending",
                 "triggered_by": triggered_by,
+                "triggered_by_user_id": triggered_by_user_id,
                 "run_at": datetime.now(timezone.utc).isoformat(),
             })
             .execute()
