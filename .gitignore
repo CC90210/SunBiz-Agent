@@ -72,3 +72,6 @@ state/
 
 # Runtime symlink into CEO-Agent (created on the VPS, not portable)
 scripts/send_gateway.py
+
+# Per-machine Claude Code config (hook paths differ per host) — never tracked
+.claude/settings.local.json
