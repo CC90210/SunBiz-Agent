@@ -105,6 +105,39 @@ MAX_ATTEMPTS = 3
 DEFAULT_BATCH = 5
 DEFAULT_INTERVAL_SECONDS = 60
 
+# Thread columns. Signer columns (migration 079) are read additively so the
+# daemon keeps working if the migration hasn't been applied yet: the first
+# query that hits a "column does not exist" error flips _SIGNER_COLS_OK off
+# and every later query drops them. owner_phone is migration 069.
+_BASE_THREAD_COLS = (
+    "id, application_id, lender_id, tenant_id, subject, "
+    "body_template, attachments, cc_emails, status, created_at, owner_phone"
+)
+_SIGNER_THREAD_COLS = "signer_name, signer_email, signer_phone"
+_SIGNER_COLS_OK: bool = True
+
+
+def _thread_cols() -> str:
+    return f"{_BASE_THREAD_COLS}, {_SIGNER_THREAD_COLS}" if _SIGNER_COLS_OK else _BASE_THREAD_COLS
+
+
+def _is_missing_column_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "42703" in msg or ("column" in msg and "does not exist" in msg)
+
+
+def _query_threads(build) -> list[dict]:
+    """Run a thread SELECT built by `build(cols)`, transparently dropping the
+    migration-079 signer columns if the DB doesn't have them yet."""
+    global _SIGNER_COLS_OK
+    try:
+        return list((build(_thread_cols()).execute().data) or [])
+    except Exception as exc:  # noqa: BLE001
+        if _SIGNER_COLS_OK and _is_missing_column_error(exc):
+            _SIGNER_COLS_OK = False
+            return list((build(_BASE_THREAD_COLS).execute().data) or [])
+        raise
+
 
 # ─── Supabase client (service role) ─────────────────────────────────
 
@@ -337,21 +370,18 @@ def _rows_from_exec_sql(result: Any) -> list[dict]:
 
 def _select_pending(client, batch_size: int, tenant_id: Optional[str]) -> list[dict]:
     """Read pending threads without claiming them. Dry-run only."""
-    q = (
-        client.table("application_lender_threads")
-        .select(
-            "id, application_id, lender_id, tenant_id, subject, "
-            "body_template, attachments, cc_emails, status, created_at, "
-            "owner_phone"  # migration 069: assigned-rep phone for substitution
+    def build(cols: str):
+        q = (
+            client.table("application_lender_threads")
+            .select(cols)
+            .eq("status", "pending")
+            .order("created_at", desc=False)
+            .limit(batch_size)
         )
-        .eq("status", "pending")
-        .order("created_at", desc=False)
-        .limit(batch_size)
-    )
-    if tenant_id:
-        q = q.eq("tenant_id", tenant_id)
-    res = q.execute()
-    return list(res.data or [])
+        if tenant_id:
+            q = q.eq("tenant_id", tenant_id)
+        return q
+    return _query_threads(build)
 
 
 def _claim_pending(client, batch_size: int, tenant_id: Optional[str], *, dry_run: bool = False) -> list[dict]:
@@ -360,10 +390,6 @@ def _claim_pending(client, batch_size: int, tenant_id: Optional[str], *, dry_run
         return _select_pending(client, batch_size, tenant_id)
 
     limit = max(1, min(int(batch_size or 1), 100))
-    cols = (
-        "id, application_id, lender_id, tenant_id, subject, "
-        "body_template, attachments, cc_emails, status, created_at, owner_phone"
-    )
     # Two-step claim. The previous single data-modifying CTE (WITH ... UPDATE
     # ... RETURNING) was passed through the exec_sql RPC, which nests it and
     # makes Postgres reject it ("WITH clause containing a data-modifying
@@ -374,16 +400,19 @@ def _claim_pending(client, batch_size: int, tenant_id: Optional[str], *, dry_run
     # (debounced to one run per minute), so there is no concurrent claimer.
     # Keep it single-instance.
     stale_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
-    q = (
-        client.table("application_lender_threads")
-        .select(cols)
-        .or_(f"status.eq.pending,and(status.eq.sending,updated_at.lt.{stale_cutoff})")
-        .order("created_at", desc=False)
-        .limit(limit)
-    )
-    if tenant_id:
-        q = q.eq("tenant_id", tenant_id)
-    candidates = list(q.execute().data or [])
+
+    def build(cols: str):
+        q = (
+            client.table("application_lender_threads")
+            .select(cols)
+            .or_(f"status.eq.pending,and(status.eq.sending,updated_at.lt.{stale_cutoff})")
+            .order("created_at", desc=False)
+            .limit(limit)
+        )
+        if tenant_id:
+            q = q.eq("tenant_id", tenant_id)
+        return q
+    candidates = _query_threads(build)
     if not candidates:
         return []
     ids = [c["id"] for c in candidates]
@@ -502,6 +531,40 @@ def _substitute_owner_phone(body_template: str, owner_phone: Optional[str]) -> s
     return result
 
 
+# ─── CC'd-agent signer (migration 079) ──────────────────────────────
+
+def _signer_env_for_thread(thread: dict, brand: Optional[str]) -> dict[str, str]:
+    """Build the per-thread signer env overrides from the thread's persisted
+    signer_name/email/phone (resolved to the deal's single CC'd agent by the
+    dashboard at queue time). Mirrors bravo_cli.bridge_tools._signer_env_overrides
+    so the cron/retry path signs as the SAME agent the chat path does, instead
+    of reverting to the brand default ("Ezra" / "SunBiz Submissions").
+
+    Brand-scoped keys (BRAVO_FROM_*_SUNBIZ) take precedence in email_template,
+    so we set both the brand-scoped and generic forms. Empty fields are skipped
+    → the brand default still applies (backward compatible for legacy threads).
+    """
+    name = str(thread.get("signer_name") or "").strip()
+    email = str(thread.get("signer_email") or "").strip()
+    phone = str(thread.get("signer_phone") or "").strip()
+    if not (name or email or phone):
+        return {}
+    brand_key = (brand or "oasis").upper().replace("-", "_")
+    env: dict[str, str] = {}
+    if name:
+        env[f"BRAVO_FROM_DISPLAY_{brand_key}"] = name
+        env["BRAVO_FROM_DISPLAY"] = name
+        # CASL footer identity follows the signer too (matches bridge tool).
+        env["CASL_SENDER_NAME"] = name
+    if email:
+        env[f"BRAVO_FROM_EMAIL_{brand_key}"] = email
+        env["BRAVO_FROM_EMAIL"] = email
+    if phone:
+        env[f"BRAVO_FROM_PHONE_{brand_key}"] = phone
+        env["BRAVO_FROM_PHONE"] = phone
+    return env
+
+
 # ─── Per-thread processing ──────────────────────────────────────────
 
 def _process_thread(client, send_fn, thread: dict, dry_run: bool) -> dict:
@@ -576,36 +639,56 @@ def _process_thread(client, send_fn, thread: dict, dry_run: bool) -> dict:
         _mark_error(client, thread_id, f"tenant brand unresolved for tenant_id={tenant_id}")
         return {"thread_id": thread_id, "status": "error", "reason": "tenant_brand_unresolved"}
 
-    result = send_fn(
-        channel="email",
-        agent_source="shop_out_sender",
-        to_email=recipient,
-        cc_email=cc_email_param,
-        lead_id=lead_id,
-        # Pass tenant_id explicitly. send_gateway's kill-switch gate (Codex
-        # audit 2026-06-08 finding #1) needs a resolved tenant to enforce
-        # operator panic-controls; if we don't supply it, the gate falls
-        # back to a DB lookup that can miss when lead_id is actually an
-        # application_id (the fallback above when app_data.lead_id is empty).
-        # We already know the tenant from the claimed thread row — trust it.
-        tenant_id=tenant_id,
-        subject=subject,
-        body_text=body,
-        # B2B broker-to-lender outreach. Not consumer commercial mail
-        # — CASL s. 6(5)(a) business-to-business exemption applies —
-        # but send_gateway still adds the footer + List-Unsubscribe as
-        # deliverability hygiene.
-        intent="commercial",
-        brand=tenant_brand,
-        attachments=attachments,
-        cooldown_hours=0,
-        metadata={
-            "shop_out_thread_id": thread_id,
-            "application_id": application_id,
-            "lender_id": lender_id,
-            "recipient_email": recipient,
-        },
-    )
+    # Apply the CC'd-agent signer (migration 079) for the duration of this
+    # send so the signature ("— {name}"), footer ("receiving this from {name}
+    # at SunBiz Funding"), and body {{agent.first_name}} render THIS agent —
+    # not the brand default. send_gateway.send() resolves the from-display from
+    # os.environ via email_template, so we set + restore the env around the
+    # call. This covers BOTH first sends AND retries (retry-errors flips the
+    # thread back to pending and it re-enters here). Restored in `finally` so
+    # one thread's signer never bleeds into the next thread in the batch.
+    import os as _os
+    signer_env = _signer_env_for_thread(thread, tenant_brand)
+    _saved_env = {k: _os.environ.get(k) for k in signer_env}
+    _os.environ.update(signer_env)
+    try:
+        result = send_fn(
+            channel="email",
+            agent_source="shop_out_sender",
+            to_email=recipient,
+            cc_email=cc_email_param,
+            lead_id=lead_id,
+            # Pass tenant_id explicitly. send_gateway's kill-switch gate (Codex
+            # audit 2026-06-08 finding #1) needs a resolved tenant to enforce
+            # operator panic-controls; if we don't supply it, the gate falls
+            # back to a DB lookup that can miss when lead_id is actually an
+            # application_id (the fallback above when app_data.lead_id is empty).
+            # We already know the tenant from the claimed thread row — trust it.
+            tenant_id=tenant_id,
+            subject=subject,
+            body_text=body,
+            # B2B broker-to-lender outreach. Not consumer commercial mail
+            # — CASL s. 6(5)(a) business-to-business exemption applies —
+            # but send_gateway still adds the footer + List-Unsubscribe as
+            # deliverability hygiene.
+            intent="commercial",
+            brand=tenant_brand,
+            attachments=attachments,
+            cooldown_hours=0,
+            metadata={
+                "shop_out_thread_id": thread_id,
+                "application_id": application_id,
+                "lender_id": lender_id,
+                "recipient_email": recipient,
+            },
+        )
+    finally:
+        # Restore env so the signer never leaks into the next thread.
+        for _k, _v in _saved_env.items():
+            if _v is None:
+                _os.environ.pop(_k, None)
+            else:
+                _os.environ[_k] = _v
 
     sg_status = result.get("status")
     if sg_status == "sent":
