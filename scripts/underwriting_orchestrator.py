@@ -129,6 +129,36 @@ def _import_submodules() -> tuple[Any, Any, Any, Any, Any]:
 
 
 # ─────────────────────────────────────────────────────────────────────
+# Document classification heuristic
+# ─────────────────────────────────────────────────────────────────────
+
+# Positive tokens that mark a filename as a bank statement; negative tokens
+# that mark it as a different KYC doc (so a mis-filed driver's license / void
+# cheque never gets parsed as a statement). Used only as a FALLBACK when no
+# canonically-typed (bank_statements_3mo / bank_statement) docs exist.
+_STATEMENT_NAME_TOKENS = ("statement", "stmt", "checking", "savings", "bank")
+_NON_STATEMENT_NAME_TOKENS = (
+    "license", "licence", "driver", "void", "cheque", "check_", "id_card",
+    "passport", "voidcheque", "dl_", "_dl", "ein", "articles",
+)
+
+
+def _looks_like_bank_statement(name: str) -> bool:
+    """True when an UNCLASSIFIED filename looks like a bank statement.
+
+    Filename-only heuristic (we never download to inspect here). Negative
+    tokens win — a name that mentions a license/cheque is excluded even if it
+    also contains a statement token.
+    """
+    n = (name or "").lower()
+    if not n:
+        return False
+    if any(tok in n for tok in _NON_STATEMENT_NAME_TOKENS):
+        return False
+    return any(tok in n for tok in _STATEMENT_NAME_TOKENS)
+
+
+# ─────────────────────────────────────────────────────────────────────
 # Storage path resolution
 # ─────────────────────────────────────────────────────────────────────
 
@@ -346,6 +376,7 @@ def _process_row(sb, row: dict) -> None:
     # so the primary lookup filters lead_documents.lead_id == application_id.
     # The fallback covers rows stored under the application's distinct
     # data->lead_id (older split-id records).
+    parent_lead_id = None
     try:
         # Primary path: docs attached under the application's own id.
         doc_rows = (
@@ -356,7 +387,7 @@ def _process_row(sb, row: dict) -> None:
             .in_("doc_type", ["bank_statements_3mo", "bank_statement"])
             .execute()
         )
-        docs = doc_rows.data or []
+        docs = list(doc_rows.data or [])
 
         if not docs:
             # Fallback path: resolve the application's distinct parent lead_id
@@ -380,7 +411,38 @@ def _process_row(sb, row: dict) -> None:
                     .in_("doc_type", ["bank_statements_3mo", "bank_statement"])
                     .execute()
                 )
-                docs = fallback_rows.data or []
+                docs = list(fallback_rows.data or [])
+
+        # 2026-06-18 (CC): MIS-CLASSIFIED-statement fallback. Operators routinely
+        # upload bank statements that land as 'unclassified' (drawer upload
+        # without picking the doc-type, or a form field name that didn't map to a
+        # canonical doc_type). If NO canonically-typed statement was found above,
+        # pull the lead's untyped/unclassified PDFs whose FILENAME looks like a
+        # bank statement and underwrite those — so real uploaded statements stop
+        # failing "none found". The filename heuristic keeps a misfiled DL / void
+        # cheque out of the set, and the query stays scoped to THIS lead's ids
+        # (never all-tenant — preserves the Codex P0 fix above).
+        if not docs:
+            lead_ids = [lid for lid in (application_id, parent_lead_id) if lid]
+            if lead_ids:
+                untyped_rows = (
+                    sb.table("lead_documents")
+                    .select("id, storage_path, doc_type, lead_id, filename")
+                    .eq("tenant_id", tenant_id)
+                    .in_("lead_id", lead_ids)
+                    .execute()
+                )
+                for d in (untyped_rows.data or []):
+                    dt = (d.get("doc_type") or "").strip().lower()
+                    if dt in ("", "unclassified", "other") and _looks_like_bank_statement(
+                        str(d.get("filename") or d.get("storage_path") or "")
+                    ):
+                        docs.append(d)
+                if docs:
+                    _log(
+                        f"underwriting[{row_id}]: no canonically-typed statements; "
+                        f"using {len(docs)} unclassified PDF(s) matched by filename heuristic"
+                    )
 
         # Codex 2026-05-25 P0 finding: do NOT fall back to all-tenant documents.
         # If neither path finds docs, fail closed with a clear error message.
