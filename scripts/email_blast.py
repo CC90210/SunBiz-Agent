@@ -145,7 +145,7 @@ EMAIL_LOGS_DIR = _LOG_DIR
 UNSUBSCRIBE_CSV = EMAIL_LISTS_DIR / "unsubscribes.csv"
 
 # CAN-SPAM physical address (update if company address changes)
-PHYSICAL_ADDRESS = "SunBiz Funding | 1234 Business Ave, Suite 100 | Miami, FL 33101"
+PHYSICAL_ADDRESS = "SunBiz Funding | 221 W Hallandale Beach Blvd, Suite 518 | Hallandale, FL 33009"
 
 # Rate-limit defaults
 DEFAULT_WORKERS = 4
