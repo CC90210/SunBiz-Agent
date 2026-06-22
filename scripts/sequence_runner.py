@@ -717,6 +717,33 @@ def _build_context(sb, tenant_id: str, lead_id: str, payload: dict) -> dict:
     return ctx
 
 
+def _normalize_us_e164(raw) -> Optional[str]:
+    """Best-effort US E.164 normalization for the SMS channel.
+
+    send_gateway rejects non-E.164 numbers ("sms channel requires to_phone
+    (E.164)"), and SunBiz lead phones arrive in mixed shapes ("(555) 555-0123",
+    "555-555-0123", "5555550123"). Normalize right before the send so a valid
+    number isn't bounced on formatting alone.
+
+      - already "+<8..15 digits>"      → keep (strip separators)
+      - 10 digits                       → "+1" + digits   (US/CA)
+      - 11 digits starting with "1"     → "+"  + digits
+      - anything else                   → None (caller skips the SMS step)
+    """
+    if not raw:
+        return None
+    s = str(raw).strip()
+    if s.startswith("+"):
+        digits = re.sub(r"\D", "", s)
+        return "+" + digits if 8 <= len(digits) <= 15 else None
+    digits = re.sub(r"\D", "", s)
+    if len(digits) == 10:
+        return "+1" + digits
+    if len(digits) == 11 and digits.startswith("1"):
+        return "+" + digits
+    return None
+
+
 def _send_step(sb, state_row: dict, sequence: dict) -> dict:
     """Fire the actual send via send_gateway.send. Returns a structured
     result so the execution loop can branch on the five real outcomes
@@ -795,8 +822,26 @@ def _send_step(sb, state_row: dict, sequence: dict) -> dict:
 
     if channel == "email" and not to_email:
         return {"outcome": "permanent", "detail": "lead has no email on file"}
-    if channel == "sms" and not to_phone:
-        return {"outcome": "permanent", "detail": "lead has no phone on file"}
+    if channel == "sms":
+        # E.164-normalize before the send so a valid number isn't bounced on
+        # formatting. If it still isn't valid (missing / junk phone), SKIP this
+        # step and ADVANCE the sequence — do NOT permanent-fail, which would
+        # also kill the lead's later email touches.
+        to_phone = _normalize_us_e164(to_phone)
+        if not to_phone:
+            return {
+                "outcome": "skipped",
+                "detail": "SMS step skipped — no valid E.164 phone after normalization; sequence advances so email touches still fire",
+            }
+        if not (body and body.strip()):
+            # The other half of send_gateway's "requires to_phone (E.164) and
+            # body_text" reject. A bodyless SMS step can never send — skip and
+            # advance rather than burn 5 retries. (Operator: give the step a
+            # body_text or disable it; surfaced in last_error.)
+            return {
+                "outcome": "skipped",
+                "detail": "SMS step skipped — step has no body_text to send; sequence advances (operator: add a body or disable this SMS step)",
+            }
 
     # Don't ship a touch whose CTA link would render blank. The Inquiry
     # Welcomer's SMS + email embed {{lead.application_url}}; a lead that never
@@ -1020,6 +1065,27 @@ def execution_tick(sb) -> int:
                 _log(f"execution: status update failed row={row['id']}: {e}")
                 continue
             _log(f"sent seq={sequence['id']} lead={row['lead_id']} step={row['step_index']}")
+            steps = sequence.get("steps") or []
+            next_idx = row["step_index"] + 1
+            if next_idx < len(steps):
+                _enroll_step(sb, sequence, row["lead_id"], row.get("context_snapshot") or {}, next_idx)
+
+        elif outcome == "skipped":
+            # Non-fatal step skip (e.g. an SMS step for a lead with no valid
+            # E.164 phone). Mark this step 'skipped' and ADVANCE to the next
+            # step so later touches (email follow-ups) still fire. Does NOT
+            # burn the retry budget and does NOT cancel the sequence.
+            try:
+                sb.table("sequence_state").update({
+                    "status": "skipped",
+                    "attempt_count": prior_attempts + 1,
+                    "last_attempt_at": now,
+                    "last_error": detail,
+                }).eq("id", row["id"]).execute()
+            except Exception as e:
+                _log(f"execution: status update failed row={row['id']}: {e}")
+                continue
+            _log(f"skipped seq={sequence['id']} lead={row['lead_id']} step={row['step_index']}: {detail}")
             steps = sequence.get("steps") or []
             next_idx = row["step_index"] + 1
             if next_idx < len(steps):
