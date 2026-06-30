@@ -124,13 +124,15 @@ def stage_candidates(
     # Batch insert; on any error, retry row-by-row so one bad/duplicate row
     # doesn't drop the whole batch and so we can record per-row outcomes.
     try:
-        sb.table(CANDIDATE_TABLE).insert([row for _h, row in pending]).execute()
+        res = sb.table(CANDIDATE_TABLE).insert([row for _h, row in pending]).execute()
         inserted.update(h for h, _row in pending)
+        _notify_ezra(env, res.data or [])
     except Exception:  # noqa: BLE001
         for h, row in pending:
             try:
-                sb.table(CANDIDATE_TABLE).insert(row).execute()
+                res = sb.table(CANDIDATE_TABLE).insert(row).execute()
                 inserted.add(h)
+                _notify_ezra(env, res.data or [])
             except Exception as e:  # noqa: BLE001
                 msg = str(e).lower()
                 if "duplicate" in msg or "unique" in msg or "23505" in msg:
@@ -139,3 +141,25 @@ def stage_candidates(
                     failed.add(h)   # real error → leave UNSEEN so next tick retries
                     print(f"[push] insert failed for {row.get('source_file')}: {e}", file=sys.stderr)
     return {"inserted": inserted, "skipped": skipped, "failed": failed}
+
+
+def _notify_ezra(env: dict[str, Any], inserted_rows: list[dict]) -> None:
+    """Send each newly-staged candidate to Ezra's Telegram for approval. No-op
+    if EZRA_TELEGRAM_CHAT_ID isn't set (dashboard-only mode)."""
+    if not (env.get("EZRA_TELEGRAM_CHAT_ID") or "").strip() or not inserted_rows:
+        return
+    try:
+        from scrubber import telegram_bridge as TB
+    except Exception as e:  # noqa: BLE001
+        print(f"[push] telegram_bridge unavailable: {e}", file=sys.stderr)
+        return
+    for row in inserted_rows:
+        cid = row.get("id")
+        if not cid:
+            continue
+        try:
+            r = TB.send_deal(env, row, candidate_id=str(cid))
+            if not r.get("ok"):
+                print(f"[push] telegram send for {cid}: {r.get('error')}", file=sys.stderr)
+        except Exception as e:  # noqa: BLE001
+            print(f"[push] telegram send failed for {cid}: {e}", file=sys.stderr)

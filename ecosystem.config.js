@@ -220,4 +220,40 @@ if (IS_LINUX) {
     });
 }
 
+// ============================================================================
+// ezra-telegram-bridge — Ezra's approve/deny poller for the UW deals
+// ============================================================================
+//
+// Long-polls Telegram for Ezra's Approve/Deny taps on the deal packets the
+// scrubber sends him. Approve → injects the lead at the uw_sheet ("Live Subs")
+// stage (createRecord-equivalent: tenant_records insert + BRAVO_RECORD_STATUS_CHANGED
+// event, so the follow-up drip fires) + flips the candidate to approved. Deny →
+// marks it declined and stops. Reads EZRA_TELEGRAM_BOT_TOKEN + EZRA_TELEGRAM_CHAT_ID.
+//
+// IS_LINUX-gated single instance (one poller owns the getUpdates offset — two
+// would fight over updates). Pairs with mca-lead-scrubber.
+if (IS_LINUX) {
+    apps.push({
+        name: "ezra-telegram-bridge",
+        script: "scripts/scrubber/telegram_bridge.py",
+        args: ["poll"],
+        interpreter: PYTHON,
+        cwd: PROJECT_ROOT,
+        watch: false,
+        autorestart: true,
+        max_restarts: 20,
+        restart_delay: 15000,
+        env: {
+            PYTHONIOENCODING: "utf-8",
+            PYTHONUNBUFFERED: "1",
+            BRAVO_AGENT_ROOT: BRAVO_ROOT,
+        },
+        log_date_format: "YYYY-MM-DD HH:mm:ss",
+        error_file: "tmp/pm2-ezra-telegram-bridge-error.log",
+        out_file: "tmp/pm2-ezra-telegram-bridge-out.log",
+        merge_logs: true,
+        max_size: "10M",
+    });
+}
+
 module.exports = { apps };

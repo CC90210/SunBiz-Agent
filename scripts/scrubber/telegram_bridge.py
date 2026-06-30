@@ -26,8 +26,10 @@ from __future__ import annotations
 import json
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -36,6 +38,8 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from _bravo_bootstrap import bootstrap_bravo_path  # noqa: E402
 
 bootstrap_bravo_path()
+
+from sunbiz_constants import SUNBIZ_TENANT_ID  # noqa: E402
 
 _TOKEN_RE = re.compile(r"^\d{6,}:[A-Za-z0-9_-]{30,}$")
 _API = "https://api.telegram.org/bot{token}/{method}"
@@ -48,6 +52,19 @@ def load_env() -> dict[str, str]:
     except Exception:  # noqa: BLE001
         import os
         return dict(os.environ)
+
+
+def supabase(env: dict[str, str]):
+    """Service-role Supabase client (or None)."""
+    url = (env.get("BRAVO_SUPABASE_URL") or "").strip()
+    key = (env.get("BRAVO_SUPABASE_SERVICE_ROLE_KEY") or "").strip()
+    if not url or not key:
+        return None
+    try:
+        from supabase import create_client
+        return create_client(url, key)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def get_token(env: dict[str, str]) -> Optional[str]:
@@ -116,6 +133,18 @@ def format_packet(cand: dict[str, Any]) -> str:
         lines.append(f"💰 True revenue: {tr}/mo")
     if d.get("leverage_ratio") is not None:
         lines.append(f"📊 Leverage: {d['leverage_ratio']}% · {d.get('mca_positions', '?')} active funder(s)")
+    # Lender names — Ezra needs to know which funders the deal involves.
+    funders = d.get("current_funders") or []
+    if funders:
+        parts = []
+        for f in funders[:8]:
+            nm = f.get("funder") or "?"
+            lev = f.get("leverage_pct")
+            cad = f.get("cadence")
+            tag = f" {lev}%" if lev is not None else ""
+            tag += f" {cad}" if cad else ""
+            parts.append(f"{nm}{(' (' + tag.strip() + ')') if tag.strip() else ''}")
+        lines.append("🏦 *Lenders:* " + ", ".join(parts))
     if d.get("previously_submitted"):
         lines.append("🔁 *Previously Submitted = Yes*")
     if d.get("iso_broker"):
@@ -145,6 +174,107 @@ def send_deal(env: dict[str, str], cand: dict[str, Any], candidate_id: str,
     })
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def inject_lead(sb, lead_data: dict[str, Any]) -> Optional[str]:
+    """Create the Command Centre lead at the uw_sheet (Live Subs) stage AND emit
+    BRAVO_RECORD_STATUS_CHANGED so the follow-up drip fires — the same effect as
+    a dashboard-driven create (shape mirrors lib/manifest/events.publishStatusChange)."""
+    data = dict(lead_data)
+    data["stage"] = "uw_sheet"  # internal key; UI label is "Live Subs"
+    res = sb.table("tenant_records").insert(
+        {"tenant_id": SUNBIZ_TENANT_ID, "entity_type": "lead", "data": data}
+    ).execute()
+    rows = res.data or []
+    lead_id = rows[0].get("id") if rows else None
+    if not lead_id:
+        return None
+    sb.table("agent_events").insert({
+        "event_type": "BRAVO_RECORD_STATUS_CHANGED",
+        "publisher_agent": "ezra-telegram-bridge",
+        "severity": "info",
+        "payload": {
+            "entity": "lead", "record_id": lead_id, "field": "stage",
+            "from": None, "to": "uw_sheet", "data": data, "tenant_id": SUNBIZ_TENANT_ID,
+        },
+        "correlation_id": SUNBIZ_TENANT_ID,
+    }).execute()
+    return lead_id
+
+
+def approve_candidate(sb, candidate_id: str, reviewer: str = "ezra-telegram") -> tuple[bool, Optional[str], str]:
+    """Approve → inject the lead + flip the candidate. Returns (ok, lead_id, msg)."""
+    r = sb.table("scrub_candidates").select("id, status, lead_data").eq("id", candidate_id).maybe_single().execute()
+    cand = r.data
+    if not cand:
+        return False, None, "not found"
+    if cand["status"] != "pending_review":
+        return False, None, f"already {cand['status']}"
+    # optimistic claim (best-effort; the inject is idempotent enough at this scale)
+    sb.table("scrub_candidates").update(
+        {"status": "approving", "reviewed_by": reviewer, "reviewed_at": _now(), "updated_at": _now()}
+    ).eq("id", candidate_id).eq("status", "pending_review").execute()
+    try:
+        lead_id = inject_lead(sb, cand["lead_data"] or {})
+    except Exception as e:  # noqa: BLE001
+        sb.table("scrub_candidates").update({"status": "pending_review", "updated_at": _now()}).eq("id", candidate_id).execute()
+        return False, None, f"inject failed: {e}"
+    sb.table("scrub_candidates").update(
+        {"status": "approved", "created_lead_id": lead_id, "updated_at": _now()}
+    ).eq("id", candidate_id).execute()
+    return True, lead_id, "approved"
+
+
+def decline_candidate(sb, candidate_id: str, reviewer: str = "ezra-telegram") -> bool:
+    upd = sb.table("scrub_candidates").update(
+        {"status": "declined", "reviewed_by": reviewer, "reviewed_at": _now(), "updated_at": _now()}
+    ).eq("id", candidate_id).eq("status", "pending_review").execute()
+    return bool(upd.data is not None)
+
+
+def poll_loop(env: dict[str, str], sb) -> None:
+    """Long-poll getUpdates for Ezra's Approve/Deny taps and act on them.
+    callback_data is 'approve:<candidate_id>' / 'deny:<candidate_id>'."""
+    me = api(env, "getMe")
+    print(f"[ezra-bridge] polling as @{me.get('result', {}).get('username')} (ok={me.get('ok')})")
+    offset: Optional[int] = None
+    while True:
+        upd = api(env, "getUpdates", {"offset": offset, "timeout": 50, "allowed_updates": ["callback_query"]})
+        if not upd.get("ok"):
+            time.sleep(5)
+            continue
+        for u in upd.get("result", []) or []:
+            offset = u["update_id"] + 1
+            cq = u.get("callback_query")
+            if not cq:
+                continue
+            data = cq.get("data", "") or ""
+            cqid = cq.get("id")
+            msg = cq.get("message", {}) or {}
+            chat = (msg.get("chat") or {}).get("id")
+            mid = msg.get("message_id")
+            if ":" not in data:
+                api(env, "answerCallbackQuery", {"callback_query_id": cqid, "text": "unrecognized"})
+                continue
+            action, cid = data.split(":", 1)
+            if action == "approve":
+                ok, lead_id, m = approve_candidate(sb, cid)
+                api(env, "answerCallbackQuery", {"callback_query_id": cqid, "text": "✅ Approved" if ok else f"⚠ {m}"})
+                if ok and chat and mid:
+                    api(env, "editMessageText", {"chat_id": chat, "message_id": mid,
+                        "text": (msg.get("text") or "") + "\n\n✅ *APPROVED* → injected to Live Subs", "parse_mode": "Markdown"})
+                print(f"[ezra-bridge] approve {cid}: ok={ok} lead={lead_id} {m}")
+            elif action == "deny":
+                ok = decline_candidate(sb, cid)
+                api(env, "answerCallbackQuery", {"callback_query_id": cqid, "text": "❌ Denied"})
+                if chat and mid:
+                    api(env, "editMessageText", {"chat_id": chat, "message_id": mid,
+                        "text": (msg.get("text") or "") + "\n\n❌ *DENIED*", "parse_mode": "Markdown"})
+                print(f"[ezra-bridge] deny {cid}: ok={ok}")
+
+
 def _sample_candidate() -> dict[str, Any]:
     return {
         "tier": "good", "score": 91,
@@ -152,6 +282,7 @@ def _sample_candidate() -> dict[str, Any]:
             "business_name": "EAGLE METAL LLC", "state": "Florida",
             "true_revenue_monthly": 106779, "leverage_ratio": 5.72, "mca_positions": 1,
             "previously_submitted": True, "iso_broker": "USC",
+            "current_funders": [{"funder": "Ondeck Capital", "cadence": "weekly", "leverage_pct": 5.72}],
             "scrub_reasons": ["true revenue $106,779/mo", "active leverage 5.72% on 1 funder",
                               "data merge clean", "PREVIOUSLY SUBMITTED = Yes"],
         },
@@ -161,7 +292,7 @@ def _sample_candidate() -> dict[str, Any]:
 def main(argv: Optional[list[str]] = None) -> int:
     import argparse
     p = argparse.ArgumentParser(description="Ezra Telegram approval bridge (send/helper half)")
-    p.add_argument("mode", choices=["getchats", "testsend"], nargs="?", default="getchats")
+    p.add_argument("mode", choices=["getchats", "testsend", "poll"], nargs="?", default="getchats")
     args = p.parse_args(argv)
     env = load_env()
 
@@ -170,6 +301,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not me.get("ok"):
         print(f"  error: {me.get('error')}", file=sys.stderr)
         return 1
+
+    if args.mode == "poll":
+        sb = supabase(env)
+        if sb is None:
+            print("  supabase client unavailable (need BRAVO_SUPABASE_URL + SERVICE_ROLE_KEY)", file=sys.stderr)
+            return 1
+        poll_loop(env, sb)
+        return 0
 
     if args.mode == "getchats":
         chats = known_chats(env)
