@@ -236,9 +236,10 @@ def tick(sb, env: dict[str, str], cfg: dict[str, Any], state_obj: dict[str, Any]
     if limit:
         sheets = sheets[:limit]
 
-    if not dry_run and not UW_SHEET_PARSER_READY:
+    ready = str(env.get("SIFT_PARSER_READY") or os.environ.get("SIFT_PARSER_READY") or "0").strip() == "1"
+    if not dry_run and not ready:
         _log(f"discovered {len(sheets)} UW Sheet(s) — parser gate CLOSED "
-             "(set SIFT_PARSER_READY=1 to go live); not parsing/scoring.")
+             "(set SIFT_PARSER_READY=1 in .env.agents to go live); not parsing/scoring.")
         return 0
 
     dedup_existing = (set(), set(), set()) if dry_run else (_existing_keys(sb) or (set(), set(), set()))
