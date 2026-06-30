@@ -116,6 +116,64 @@ def _money(v: Any) -> Optional[str]:
         return None
 
 
+_CADENCE_ABBR = {"daily": "day", "weekly": "wk", "monthly": "mo"}
+
+
+def _md(s: Any) -> str:
+    """Strip Markdown-breaking chars from a dynamic value (legacy parse_mode)."""
+    return re.sub(r"[_*`\[\]]", " ", str(s)).strip()
+
+
+def _is_counted(p: dict[str, Any]) -> bool:
+    """An ACTIVE position under CC's rule: daily/weekly, not paid off, not the
+    Breeze Advance row. These are the funders the leverage/position count uses."""
+    return (
+        p.get("cadence") in ("daily", "weekly")
+        and not p.get("paid_off")
+        and not p.get("is_breeze_advance")
+    )
+
+
+def _funder_lines(d: dict[str, Any]) -> list[str]:
+    """Render the FULL funder stack so Ezra sees every position — active,
+    paid-off, and monthly — not just the one counted toward leverage. Prefers
+    the complete `uw_all_positions`; falls back to `current_funders` (active
+    only) for older candidates that didn't carry the full stack."""
+    stack = d.get("uw_all_positions") or d.get("current_funders") or []
+    # Drop the Breeze Advance row (the NEW advance offered, not a stack position)
+    # and any empty/zero placeholder rows.
+    funders = [p for p in stack if p.get("funder") and not p.get("is_breeze_advance")]
+    if not funders:
+        return []
+    active = sum(1 for p in funders if _is_counted(p))
+    header = f"🏦 *Funder stack — {len(funders)} total · {active} active:*"
+    lines = [header]
+    for p in funders[:15]:
+        if _is_counted(p):
+            marker, tag = "✅", "active"
+        elif p.get("paid_off"):
+            marker, tag = "💤", "paid off"
+        elif p.get("cadence") == "monthly":
+            marker, tag = "📅", "monthly"
+        else:
+            marker, tag = "•", (p.get("cadence") or "")
+        if str(p.get("status") or "").strip().lower() == "previous":
+            tag = (tag + " · prior").strip(" ·")
+        lev = p.get("leverage_pct")
+        cad = _CADENCE_ABBR.get(p.get("cadence") or "", p.get("cadence") or "")
+        bits = []
+        if lev is not None:
+            bits.append(f"{lev}%")
+        if cad:
+            bits.append(cad)
+        meta = (" — " + " ".join(bits)) if bits else ""
+        suffix = f"  _({tag})_" if tag else ""
+        lines.append(f"  {marker} {_md(p.get('funder'))}{meta}{suffix}")
+    if len(funders) > 15:
+        lines.append(f"  …+{len(funders) - 15} more")
+    return lines
+
+
 def format_packet(cand: dict[str, Any]) -> str:
     """Render a scored deal as the Telegram message Ezra reviews. `cand` is a
     {data, score_result} candidate, or a scrub_candidates row (lead_data + tier)."""
@@ -132,19 +190,10 @@ def format_packet(cand: dict[str, Any]) -> str:
     if tr:
         lines.append(f"💰 True revenue: {tr}/mo")
     if d.get("leverage_ratio") is not None:
-        lines.append(f"📊 Leverage: {d['leverage_ratio']}% · {d.get('mca_positions', '?')} active funder(s)")
-    # Lender names — Ezra needs to know which funders the deal involves.
-    funders = d.get("current_funders") or []
-    if funders:
-        parts = []
-        for f in funders[:8]:
-            nm = f.get("funder") or "?"
-            lev = f.get("leverage_pct")
-            cad = f.get("cadence")
-            tag = f" {lev}%" if lev is not None else ""
-            tag += f" {cad}" if cad else ""
-            parts.append(f"{nm}{(' (' + tag.strip() + ')') if tag.strip() else ''}")
-        lines.append("🏦 *Lenders:* " + ", ".join(parts))
+        lines.append(f"📊 Active leverage: {d['leverage_ratio']}% · {d.get('mca_positions', '?')} active funder(s)")
+    # Full funder stack — Ezra needs EVERY position (active, paid-off, monthly),
+    # not just the one counted toward leverage. (uw_all_positions carries them.)
+    lines.extend(_funder_lines(d))
     if d.get("previously_submitted"):
         lines.append("🔁 *Previously Submitted = Yes*")
     if d.get("iso_broker"):
@@ -276,13 +325,26 @@ def poll_loop(env: dict[str, str], sb) -> None:
 
 
 def _sample_candidate() -> dict[str, Any]:
+    # Real EAGLE METAL stack (UW Sheet 2.5, 2026-06-30): 8 funders, only Ondeck
+    # active (daily/weekly + unpaid). Exercises the full-stack renderer.
+    stack = [
+        {"status": "Current",  "funder": "Novuscapital",  "cadence": "weekly",  "leverage_pct": 32.90, "paid_off": True},
+        {"status": "Current",  "funder": "Ondeck Capital", "cadence": "weekly",  "leverage_pct": 5.72,  "paid_off": False},
+        {"status": "Current",  "funder": "Kapitus",        "cadence": "weekly",  "leverage_pct": 10.61, "paid_off": True},
+        {"status": "Previous", "funder": "Novuscapital",   "cadence": "weekly",  "leverage_pct": 30.71, "paid_off": True},
+        {"status": "Current",  "funder": "Lendingclub",    "cadence": "monthly", "leverage_pct": 0.96,  "paid_off": False},
+        {"status": "Current",  "funder": "Headway",        "cadence": "monthly", "leverage_pct": 24.36, "paid_off": False},
+        {"status": "Current",  "funder": "Hyg Financial",  "cadence": "monthly", "leverage_pct": 0.94,  "paid_off": False},
+        {"status": "Current",  "funder": "P1 Finance",     "cadence": "monthly", "leverage_pct": 2.02,  "paid_off": False},
+    ]
     return {
         "tier": "good", "score": 91,
         "data": {
             "business_name": "EAGLE METAL LLC", "state": "Florida",
             "true_revenue_monthly": 106779, "leverage_ratio": 5.72, "mca_positions": 1,
             "previously_submitted": True, "iso_broker": "USC",
-            "current_funders": [{"funder": "Ondeck Capital", "cadence": "weekly", "leverage_pct": 5.72}],
+            "current_funders": [p for p in stack if _is_counted(p)],
+            "uw_all_positions": stack,
             "scrub_reasons": ["true revenue $106,779/mo", "active leverage 5.72% on 1 funder",
                               "data merge clean", "PREVIOUSLY SUBMITTED = Yes"],
         },
