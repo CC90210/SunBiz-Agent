@@ -61,13 +61,13 @@ try:
 except Exception:
     pass
 
-# Discovery is OWNER-based (verified more reliable than folder/parents for
-# shared drives). The SunBiz account owns the incoming sheets; our own copies
-# / Bravo outputs are owned by conaugh@oasisai.work and are thus excluded.
-SHEET_OWNER = os.environ.get("SIFT_SHEET_OWNER", "admin@sunbizfunding.com")
-# Only scrub sheets whose title contains this hint — the raw web-form export
-# naming, excluding aggregate "1750 MCA apps" / "BA Approvals" artifacts.
-SHEET_TITLE_HINT = os.environ.get("SIFT_SHEET_TITLE_HINT", "MCA_Webforms")
+# Discovery is OWNER-based. The REAL source (verified 2026-06-30 as the Breeze
+# identity) is per-deal "UW Sheet_<id>_<business>" Google Sheets owned by
+# Breeze's submissions account — NOT bulk MCA_Webforms tables. Each file is ONE
+# deal's underwriting workbook (tabs: "UW Sheet 2.5"/2.0/1.0 + Guidelines).
+SHEET_OWNER = os.environ.get("SIFT_SHEET_OWNER", "Submissions@breezeadvance.com")
+# Only the per-deal underwriting sheets (excludes the supporting PDFs/credit pulls).
+SHEET_TITLE_HINT = os.environ.get("SIFT_SHEET_TITLE_HINT", "UW Sheet")
 
 
 def _log(msg: str) -> None:
