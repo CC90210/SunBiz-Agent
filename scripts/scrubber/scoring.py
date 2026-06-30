@@ -66,6 +66,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "claude": {"enabled": False, "model": "claude-haiku-4-5-20251001", "only_for_tier": ["review"]},
     "gate": {"mode": "require_ezra"},
+    # Breeze UW Sheet rules (real, validated) — consumed by uw_scoring.py.
+    "uw": {
+        "min_true_revenue_monthly": 80000,
+        "max_active_leverage_pct": 40,
+        "max_active_positions": 4,
+        "restricted_industries": ["trucking", "accounting", "law", "transportation", "cannabis", "auto sales", "solar"],
+        "blocked_iso": ["nationwide advance"],
+        "funder_tiers": {"A": ["specialty capital", "altfunding", "alt funding"], "B": ["mulligan"]},
+    },
 }
 
 
