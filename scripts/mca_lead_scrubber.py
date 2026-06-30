@@ -294,57 +294,35 @@ def doctor(env: dict[str, str]) -> None:
     print(f"  bridge HMAC secret:         {'yes' if hmac_ok else 'NO (push will fail)'}")
     print(f"  dashboard base URL:         {base_url}")
 
-    # aiscrubbing@ Gmail creds (identity / future use)
+    # Breeze email identity (IMAP/SMTP) — OPTIONAL, unused in v1 (Drive-only
+    # ingest; the daemon never sends). Presence only, never the address.
     gmail_user = (env.get("GMAIL_USER_BREEZE") or env.get("AISCRUBBING_GMAIL_USER") or "").strip()
     gmail_pw = bool((env.get("GMAIL_APP_PASSWORD_BREEZE") or env.get("AISCRUBBING_GMAIL_APP_PASSWORD") or "").strip())
-    # Print PRESENCE only — never the address itself (PM2 captures stdout to a
-    # log file that may ship to an aggregator). SEC review 2026-06-30.
-    print(f"  aiscrubbing@ Gmail user:    {'set' if gmail_user else '(not set — GMAIL_USER_BREEZE)'}")
-    print(f"  aiscrubbing@ app password:  {'yes' if gmail_pw else 'no'}")
+    print(f"  Breeze email (optional):    user={'set' if gmail_user else 'unset'}  app_pw={'yes' if gmail_pw else 'no'}")
 
-    # gws / Drive access — THE critical go-live gate (Drive is the only source)
+    # Breeze Drive identity (aiscrubbing@breezeadvance.com) — THE ingestion auth.
+    from scrubber import ingest as _ingest
+    breeze_missing = _ingest._missing_creds(env)
+    print(f"  Breeze Drive creds:         {'all set' if not breeze_missing else 'MISSING: ' + ', '.join(breeze_missing)}")
     print(f"  Drive source owner:         {SHEET_OWNER}")
     print(f"  sheet title hint:           {SHEET_TITLE_HINT}")
-    drive_ok, detail = _check_drive_access()
-    print(f"  gws Drive access:           {'OK — ' + detail if drive_ok else 'FAIL — ' + detail}")
-    if drive_ok:
-        # Show how many candidate sheets discovery currently finds.
+    if breeze_missing:
+        print("  Drive access:               SKIPPED — set BREEZE_GOOGLE_* in .env.agents "
+              "(refresh token via scripts/scrubber/google_oauth_setup.py)", file=sys.stderr)
+    else:
         try:
-            from scrubber import ingest
-            found = ingest.discover_sheets(env, owner=SHEET_OWNER, title_hint=SHEET_TITLE_HINT, max_results=50)
+            found = _ingest.discover_sheets(env, owner=SHEET_OWNER, title_hint=SHEET_TITLE_HINT, max_results=100)
+            print("  Drive access:               OK (authed as Breeze)")
             print(f"  candidate sheets found:     {len(found)}")
             for r in found[:5]:
                 print(f"      • {r['name']}  ({r.get('modified_time')})")
+            if not found:
+                print("  ⚠️  0 sheets found — confirm SunBiz shared the lead-sheet folder with "
+                      "aiscrubbing@breezeadvance.com.", file=sys.stderr)
         except Exception as e:  # noqa: BLE001
-            print(f"  candidate sheets:           discovery error: {e}", file=sys.stderr)
-    else:
-        print("  ⚠️  Drive is the ONLY ingestion source. Provision gws OAuth on this host "
-              "(or a service account) before go-live.", file=sys.stderr)
+            print(f"  Drive access:               FAIL — {e}", file=sys.stderr)
 
     print(f"  ledger path:                {st.LEDGER_PATH}")
-
-
-def _check_drive_access() -> tuple[bool, str]:
-    """Probe gws/Drive via google_tool.py. Returns (ok, detail)."""
-    if BRAVO_ROOT is None:
-        return False, "CEO-Agent root not found"
-    tool = Path(BRAVO_ROOT) / "scripts" / "integrations" / "google_tool.py"
-    if not tool.exists():
-        return False, f"google_tool.py not found at {tool}"
-    import subprocess
-    try:
-        proc = subprocess.run(
-            [sys.executable, str(tool), "drive", "list", "--max", "1"],
-            capture_output=True, text=True, timeout=60,
-        )
-    except subprocess.TimeoutExpired:
-        return False, "drive list timed out (auth prompt?)"
-    except Exception as e:  # noqa: BLE001
-        return False, f"spawn error: {e}"
-    if proc.returncode == 0:
-        return True, "drive list returned 0"
-    err = (proc.stderr or proc.stdout or "").strip().replace("\n", " ")[:160]
-    return False, f"exit {proc.returncode}: {err}"
 
 
 # ── main ─────────────────────────────────────────────────────────────────
