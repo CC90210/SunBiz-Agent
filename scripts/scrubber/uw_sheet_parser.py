@@ -81,7 +81,7 @@ def _is_yes(v: Any) -> bool:
 
 # ── locating labels ────────────────────────────────────────────────────────
 
-def _build_label_index(ws, max_row: int = 60, max_col: int = 30) -> dict[str, tuple[int, int]]:
+def _build_label_index(ws, max_row: int = 90, max_col: int = 30) -> dict[str, tuple[int, int]]:
     """First occurrence of each string label → (row, col)."""
     idx: dict[str, tuple[int, int]] = {}
     for row in ws.iter_rows(min_row=1, max_row=min(max_row, ws.max_row or max_row), max_col=max_col):
@@ -186,6 +186,15 @@ def parse_uw_sheet(workbook) -> dict[str, Any]:
         if "Monthly Leverage" in idx:
             monthly_lev_avg = _pct(ws.cell(avg_row, idx["Monthly Leverage"][1]).value)
 
+    # contact / entity (Jotform block) — best-effort, often partially filled
+    owner_first = _str(_right_of(ws, idx, "Owner First Name"))
+    owner_last = _str(_right_of(ws, idx, "Owner Last Name"))
+    owner_name = " ".join(p for p in (owner_first, owner_last) if p) or None
+    email = _str(_right_of(ws, idx, "Email"))
+    phone = _str(_right_of(ws, idx, "Phone"))
+    ein = _str(_right_of(ws, idx, "Federal Tax ID"))
+    business_address = _str(_right_of(ws, idx, "Business Address"))
+
     positions = _parse_positions(ws, idx)
 
     # CC's rule: positions/leverage count DAILY + WEEKLY funders only (monthly
@@ -215,6 +224,11 @@ def parse_uw_sheet(workbook) -> dict[str, Any]:
         "industry": industry,
         "state": state,
         "first_position": first_position,
+        "owner_name": owner_name,
+        "email": email,
+        "phone": phone,
+        "ein": ein,
+        "business_address": business_address,
         "true_revenue_monthly": true_rev_avg,      # avg monthly True Revenue (col H)
         "sheet_monthly_leverage": monthly_lev_avg,  # the sheet's own avg (incl. monthly funders)
         "positions": positions,

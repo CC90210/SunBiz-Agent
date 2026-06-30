@@ -129,10 +129,9 @@ def discover_sheets(
     return refs
 
 
-def fetch_rows(env: dict[str, Any], ref: dict[str, Any]) -> list[dict[str, Any]]:
-    """Download a sheet to a temp .xlsx and parse it with the importer's
-    read_rows(). Google Sheets are exported to .xlsx; native .xlsx is
-    downloaded as-is."""
+def _download_xlsx(env: dict[str, Any], ref: dict[str, Any]) -> bytes:
+    """Download a Drive file as .xlsx bytes. Google Sheets are EXPORTED to
+    .xlsx; a native .xlsx is downloaded as-is."""
     from googleapiclient.http import MediaIoBaseDownload
 
     svc = drive_service(env)
@@ -142,14 +141,28 @@ def fetch_rows(env: dict[str, Any], ref: dict[str, Any]) -> list[dict[str, Any]]
         request = svc.files().export_media(fileId=file_id, mimeType=XLSX_MIME)
     else:
         request = svc.files().get_media(fileId=file_id, supportsAllDrives=True)
-
     buf = io.BytesIO()
     downloader = MediaIoBaseDownload(buf, request)
     done = False
     while not done:
         _status, done = downloader.next_chunk()
+    return buf.getvalue()
 
+
+def fetch_workbook(env: dict[str, Any], ref: dict[str, Any]):
+    """Download a per-deal UW Sheet and return an openpyxl workbook (data_only)
+    for uw_sheet_parser.parse_uw_sheet(). This is the PRIMARY path now (the
+    source is per-deal FORM workbooks, not row tables)."""
+    import openpyxl
+    data = _download_xlsx(env, ref)
+    return openpyxl.load_workbook(io.BytesIO(data), data_only=True)
+
+
+def fetch_rows(env: dict[str, Any], ref: dict[str, Any]) -> list[dict[str, Any]]:
+    """LEGACY row-table path (bulk MCA_Webforms exports). Kept for the
+    --source-path test affordance; the live UW Sheet path uses fetch_workbook."""
+    data = _download_xlsx(env, ref)
     with tempfile.TemporaryDirectory(prefix="sift_dl_") as td:
         out_path = Path(td) / "sheet.xlsx"
-        out_path.write_bytes(buf.getvalue())
+        out_path.write_bytes(data)
         return read_rows(out_path)

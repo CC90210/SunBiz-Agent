@@ -192,63 +192,95 @@ def _histogram(candidates: list[dict[str, Any]]) -> str:
 
 # ── tick (loop mode — Drive discovery) ──────────────────────────────────
 
-def tick(sb, env: dict[str, str], cfg: dict[str, Any], state_obj: dict[str, Any]) -> int:
-    """One pass: discover new Drive sheets, scrub, stage candidates for Ezra.
-    Returns the number of candidates staged. Drive ingest + candidate push
-    are wired in Phase 2/3 (ingest.py / push.py); imported lazily so the
-    local-file path and `doctor` work before they land."""
-    try:
-        from scrubber import ingest  # Phase 2
-    except Exception as e:  # noqa: BLE001
-        _log(f"ingest module not available yet ({e}) — Drive discovery skipped")
-        return 0
+def build_lead_data(parsed: dict[str, Any], result: dict[str, Any], ref: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
+    """Map a parsed UW Sheet + its score into the tenant_records.data shape for
+    the Command Centre lead (stage=uw_sheet). Drops empty values."""
+    import re as _re
+    nm = parsed.get("business_legal_name")
+    m = _re.search(r"UW Sheet[_ ](\d+)", ref.get("name", "") or "")
+    deal_id = m.group(1) if m else None
+    data = {
+        "business_name": nm, "company": nm,
+        "name": parsed.get("owner_name") or nm,
+        "contact_name": parsed.get("owner_name"),
+        "email": parsed.get("email"), "phone": parsed.get("phone"),
+        "state": parsed.get("state"), "industry": parsed.get("industry"),
+        "ein": parsed.get("ein"), "business_address": parsed.get("business_address"),
+        "stage": "uw_sheet", "status": "new",
+        "monthly_revenue": parsed.get("true_revenue_monthly"),
+        "true_revenue_monthly": parsed.get("true_revenue_monthly"),
+        "mca_positions": parsed.get("position_count"),
+        "leverage_ratio": parsed.get("leverage_pct"),
+        "previously_submitted": parsed.get("previously_submitted"),
+        "iso_broker": parsed.get("iso_broker"), "tib": parsed.get("tib"),
+        "current_funders": parsed.get("counted_funders"),
+        "uw_all_positions": parsed.get("positions"),
+        "source": "breeze_uw_sheet", "source_deal_id": deal_id,
+        "source_file": ref.get("name"), "source_file_id": ref.get("id"),
+        "score": result["score"], "scrub_tier": result["tier"],
+        "scrub_reasons": result.get("reasons"), "scrub_decline_reason": result.get("decline_reason"),
+        "scrubbed_at": datetime.now(timezone.utc).isoformat(),
+        "scoring_config_version": cfg.get("version"),
+    }
+    return {k: v for k, v in data.items() if v not in (None, "")}
+
+
+def tick(sb, env: dict[str, str], cfg: dict[str, Any], state_obj: dict[str, Any],
+         dry_run: bool = False, limit: Optional[int] = None) -> int:
+    """One pass over Breeze UW Sheets: parse + score ONE deal per sheet and
+    stage qualified candidates for Ezra. `dry_run` scores + prints WITHOUT
+    staging (and bypasses the readiness gate, since it's read-only)."""
+    from scrubber import ingest, uw_sheet_parser as P, uw_scoring
 
     sheets = ingest.discover_sheets(env, owner=SHEET_OWNER, title_hint=SHEET_TITLE_HINT)
+    if limit:
+        sheets = sheets[:limit]
 
-    # PARSER READINESS GATE — discovery works, but the per-deal UW Sheet parser
-    # is pending the SOP (see UW_SHEET_PARSER_READY). Refuse to parse/score here
-    # rather than silently mis-parse a per-deal FORM with the legacy row-table
-    # path. doctor + discovery still prove auth/access; this just stops garbage.
-    if not UW_SHEET_PARSER_READY:
-        _log(
-            f"discovered {len(sheets)} UW Sheet(s) — per-deal parser is PENDING the SOP; "
-            "not parsing/scoring (set SIFT_PARSER_READY=1 once the SOP parser lands)."
-        )
+    if not dry_run and not UW_SHEET_PARSER_READY:
+        _log(f"discovered {len(sheets)} UW Sheet(s) — parser gate CLOSED "
+             "(set SIFT_PARSER_READY=1 to go live); not parsing/scoring.")
         return 0
 
+    dedup_existing = (set(), set(), set()) if dry_run else (_existing_keys(sb) or (set(), set(), set()))
+    tiers: Counter = Counter()
     staged_total = 0
     for ref in sheets:
-        if st.is_file_processed(state_obj, ref["id"], ref.get("modified_time")):
+        if not dry_run and st.is_file_processed(state_obj, ref["id"], ref.get("modified_time")):
             continue
+        name = (ref.get("name") or ref["id"])[:42]
         try:
-            rows = ingest.fetch_rows(env, ref)
+            wb = ingest.fetch_workbook(env, ref)
+            parsed = P.parse_uw_sheet(wb)
         except Exception as e:  # noqa: BLE001
-            _log(f"fetch failed for {ref.get('name', ref['id'])}: {e}")
+            _log(f"parse failed for {name}: {e}")
+            continue
+        result = uw_scoring.score_uw_deal(parsed, cfg)
+        tiers[result["tier"]] += 1
+        data = build_lead_data(parsed, result, ref, cfg)
+
+        if dry_run:
+            biz = (parsed.get("business_legal_name") or name)[:34]
+            why = result["decline_reason"] if result.get("prefilter_decline") else ", ".join((result.get("reasons") or [])[:3])
+            _log(f"  [{result['tier']:6}] {result['score']:>3} {biz:34} :: {why}")
             continue
 
-        dedup_existing = _existing_keys(sb)
-        source_tag = f"sift_scrub_{ref.get('name', ref['id'])}"
-        candidates = scrub_rows(
-            rows, cfg, source_tag, sb=sb, state_obj=state_obj, dedup_existing=dedup_existing
-        )
-
-        push_result = _stage_candidates(sb, env, cfg, ref, candidates, dedup_existing)
-        staged = len(push_result["inserted"])
-        staged_total += staged
-        # Mark seen ONLY rows fully handled this tick: inserted, dedup-skipped,
-        # or classified bad. Rows whose INSERT failed stay unseen so the next
-        # tick retries them — never silently drop a lead on a transient DB error.
-        bad_hashes = {c["row_hash"] for c in candidates if c["score_result"]["tier"] == "bad"}
-        for h in (push_result["inserted"] | push_result["skipped"] | bad_hashes):
+        h = st.row_hash(data)
+        if st.is_row_seen(state_obj, h):
+            st.mark_file_processed(state_obj, ref["id"], ref.get("modified_time"), 1, 0)
+            continue
+        candidate = {"data": data, "score_result": result, "row_hash": h}
+        push_result = _stage_candidates(sb, env, cfg, ref, [candidate], dedup_existing)
+        if h in push_result["inserted"] or h in push_result["skipped"] or result["tier"] == "bad":
             st.mark_row_seen(state_obj, h)
-        # Mark the FILE processed only when nothing failed; otherwise leave it so
-        # the next tick re-scans and retries the failed rows (row-level dedup
-        # skips the already-done ones).
         if not push_result["failed"]:
-            st.mark_file_processed(state_obj, ref["id"], ref.get("modified_time"), len(rows), staged)
+            st.mark_file_processed(state_obj, ref["id"], ref.get("modified_time"), 1, len(push_result["inserted"]))
         st.save_state(st.strip_runtime(state_obj))
-        failed_note = f" (FAILED {len(push_result['failed'])} — will retry)" if push_result["failed"] else ""
-        _log(f"sheet {ref.get('name', ref['id'])}: {len(rows)} rows → {_histogram(candidates)} → staged {staged}{failed_note}")
+        staged_total += len(push_result["inserted"])
+        if push_result["inserted"]:
+            _log(f"  staged [{result['tier']}] {(parsed.get('business_legal_name') or name)[:34]}")
+
+    if dry_run:
+        _log(f"DRY RUN — scored {sum(tiers.values())} deal(s): {dict(tiers)} — nothing staged")
     return staged_total
 
 
@@ -355,8 +387,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("mode", choices=["once", "loop", "doctor"], nargs="?", default="once")
     parser.add_argument("--interval", type=int, default=120, help="seconds between Drive polls (loop)")
     parser.add_argument("--source-path", help="local .xlsx/.csv to scrub (test path; bypasses Drive)")
-    parser.add_argument("--dry-run", action="store_true", help="no writes (with --source-path)")
-    parser.add_argument("--limit", type=int, default=None, help="cap rows (smoke testing)")
+    parser.add_argument("--dry-run", action="store_true", help="score + print, NO writes (works with --source-path OR `once`; also bypasses the readiness gate)")
+    parser.add_argument("--limit", type=int, default=None, help="cap sheets/rows processed (smoke testing)")
     args = parser.parse_args(argv)
 
     env = _load_env()
@@ -376,14 +408,15 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0
 
     sb = _client(env)
-    if sb is None:
+    if sb is None and not args.dry_run:
         return 1
 
     state_obj = st.load_state()
 
     if args.mode == "once":
-        n = tick(sb, env, cfg, state_obj)
-        _log(f"once: staged {n} candidate(s)")
+        n = tick(sb, env, cfg, state_obj, dry_run=args.dry_run, limit=args.limit)
+        if not args.dry_run:
+            _log(f"once: staged {n} candidate(s)")
         return 0
 
     # loop
