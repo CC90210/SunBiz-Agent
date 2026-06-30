@@ -41,6 +41,10 @@ bootstrap_bravo_path()
 
 from sunbiz_constants import SUNBIZ_TENANT_ID  # noqa: E402
 
+# CC's active-funder rule lives in ONE place (the parser) — import it so the
+# packet's "active" marker can never drift from the scorer's leverage math.
+from scrubber.uw_sheet_parser import is_active_position  # noqa: E402
+
 _TOKEN_RE = re.compile(r"^\d{6,}:[A-Za-z0-9_-]{30,}$")
 _API = "https://api.telegram.org/bot{token}/{method}"
 
@@ -124,16 +128,6 @@ def _md(s: Any) -> str:
     return re.sub(r"[_*`\[\]]", " ", str(s)).strip()
 
 
-def _is_counted(p: dict[str, Any]) -> bool:
-    """An ACTIVE position under CC's rule: daily/weekly, not paid off, not the
-    Breeze Advance row. These are the funders the leverage/position count uses."""
-    return (
-        p.get("cadence") in ("daily", "weekly")
-        and not p.get("paid_off")
-        and not p.get("is_breeze_advance")
-    )
-
-
 def _funder_lines(d: dict[str, Any]) -> list[str]:
     """Render the FULL funder stack so Ezra sees every position — active,
     paid-off, and monthly — not just the one counted toward leverage. Prefers
@@ -145,11 +139,11 @@ def _funder_lines(d: dict[str, Any]) -> list[str]:
     funders = [p for p in stack if p.get("funder") and not p.get("is_breeze_advance")]
     if not funders:
         return []
-    active = sum(1 for p in funders if _is_counted(p))
+    active = sum(1 for p in funders if is_active_position(p))
     header = f"🏦 *Funder stack — {len(funders)} total · {active} active:*"
     lines = [header]
     for p in funders[:15]:
-        if _is_counted(p):
+        if is_active_position(p):
             marker, tag = "✅", "active"
         elif p.get("paid_off"):
             marker, tag = "💤", "paid off"
@@ -343,7 +337,7 @@ def _sample_candidate() -> dict[str, Any]:
             "business_name": "EAGLE METAL LLC", "state": "Florida",
             "true_revenue_monthly": 106779, "leverage_ratio": 5.72, "mca_positions": 1,
             "previously_submitted": True, "iso_broker": "USC",
-            "current_funders": [p for p in stack if _is_counted(p)],
+            "current_funders": [p for p in stack if is_active_position(p)],
             "uw_all_positions": stack,
             "scrub_reasons": ["true revenue $106,779/mo", "active leverage 5.72% on 1 funder",
                               "data merge clean", "PREVIOUSLY SUBMITTED = Yes"],

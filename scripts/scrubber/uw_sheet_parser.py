@@ -103,6 +103,20 @@ def _right_of(ws, idx: dict, label: str) -> Any:
 
 # ── positions box ──────────────────────────────────────────────────────────
 
+def is_active_position(p: dict[str, Any]) -> bool:
+    """CC's funder rule (2026-06-30) in ONE place — a position that COUNTS toward
+    the 2-4 position count and the <40% leverage cap. It must pay DAILY or WEEKLY
+    (monthly lenders are not MCA positions), NOT be already Paid Off, and NOT be
+    the "Breeze Advance" row (the new advance being offered, not an existing
+    stack position). Imported by the parser AND the Telegram packet renderer so
+    the rule can never drift between scoring and display."""
+    return (
+        p.get("cadence") in ("daily", "weekly")
+        and not p.get("paid_off")
+        and not p.get("is_breeze_advance")
+    )
+
+
 def _parse_positions(ws, idx: dict) -> list[dict[str, Any]]:
     """Read the positions box: one dict per funder row.
     {status, funder, cadence, payment, leverage_pct}. Stops at the Total row."""
@@ -202,12 +216,7 @@ def parse_uw_sheet(workbook) -> dict[str, Any]:
     # Paid Off (no longer an obligation) and the "Breeze Advance" row (that's
     # the NEW advance being offered, not an existing stack position). The
     # remainder is the active stack the 2-4 count + <40% leverage rules apply to.
-    counted = [
-        p for p in positions
-        if p.get("cadence") in ("daily", "weekly")
-        and not p.get("paid_off")
-        and not p.get("is_breeze_advance")
-    ]
+    counted = [p for p in positions if is_active_position(p)]
     position_count = len(counted)
     counted_lev = [p["leverage_pct"] for p in counted if p.get("leverage_pct") is not None]
     leverage_pct = round(sum(counted_lev), 2) if counted_lev else (0.0 if not counted else None)
