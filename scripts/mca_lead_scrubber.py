@@ -69,6 +69,17 @@ SHEET_OWNER = os.environ.get("SIFT_SHEET_OWNER", "Submissions@breezeadvance.com"
 # Only the per-deal underwriting sheets (excludes the supporting PDFs/credit pulls).
 SHEET_TITLE_HINT = os.environ.get("SIFT_SHEET_TITLE_HINT", "UW Sheet")
 
+# ── PARSER READINESS GATE ────────────────────────────────────────────────
+# The per-deal UW Sheet parser is PENDING CC's underwriting SOP, which defines
+# the tab/version (e.g. "UW Sheet 2.5"), the field→metric map, and the scoring
+# thresholds. Until that lands, tick() DISCOVERS sheets but REFUSES to parse or
+# score them: the legacy row-table path (scrub_rows / columns / import_mca_leads)
+# was built for bulk MCA_Webforms tables and does NOT fit the per-deal UW Sheet
+# FORM — running it would silently produce garbage candidates. Flip to True only
+# when the SOP-driven per-deal parser replaces that path. (doctor + discovery +
+# the local --source-path test path are unaffected.)
+UW_SHEET_PARSER_READY = os.environ.get("SIFT_PARSER_READY", "0") == "1"
+
 
 def _log(msg: str) -> None:
     ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -193,6 +204,18 @@ def tick(sb, env: dict[str, str], cfg: dict[str, Any], state_obj: dict[str, Any]
         return 0
 
     sheets = ingest.discover_sheets(env, owner=SHEET_OWNER, title_hint=SHEET_TITLE_HINT)
+
+    # PARSER READINESS GATE — discovery works, but the per-deal UW Sheet parser
+    # is pending the SOP (see UW_SHEET_PARSER_READY). Refuse to parse/score here
+    # rather than silently mis-parse a per-deal FORM with the legacy row-table
+    # path. doctor + discovery still prove auth/access; this just stops garbage.
+    if not UW_SHEET_PARSER_READY:
+        _log(
+            f"discovered {len(sheets)} UW Sheet(s) — per-deal parser is PENDING the SOP; "
+            "not parsing/scoring (set SIFT_PARSER_READY=1 once the SOP parser lands)."
+        )
+        return 0
+
     staged_total = 0
     for ref in sheets:
         if st.is_file_processed(state_obj, ref["id"], ref.get("modified_time")):
