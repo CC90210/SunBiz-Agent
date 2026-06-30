@@ -177,4 +177,47 @@ apps.push({
     max_size: "10M",
 });
 
+// ============================================================================
+// mca-lead-scrubber — "Breeze UW Entry Sheet" (Solara backend automation)
+// ============================================================================
+//
+// Watches the shared Breeze/SunBiz Google Drive for new MCA web-form lead
+// sheets, scrubs each deal against config-driven underwriting criteria
+// (scrubber/scoring_config.yaml — SOP-tunable), and writes the qualified ones
+// to scrub_candidates as pending_review for Ezra to approve in the Command
+// Centre (/uw-sheet). Approval creates the lead at the uw_sheet stage.
+//
+// IS_LINUX-GATED ON PURPOSE: discovery polls Drive and must be a SINGLE owner.
+// Running it on CC's Mac AND the VPS would double-process every sheet. It runs
+// ONLY on the Linux VPS. (Surfaced in the dashboard Automations tab as a
+// background worker via lib/automations/sunbiz-workers.ts → "pm2.mca-lead-scrubber".)
+//
+// 120s tick (within CC's 15-30 min target, well under the "5 min is too slow"
+// bar). Detection is cheap; the heavy scrub only runs on newly-seen sheets.
+// Reaches Drive via google_tool.py (gws OAuth) — verify with `doctor` that the
+// VPS has gws auth + openpyxl before relying on it.
+if (IS_LINUX) {
+    apps.push({
+        name: "mca-lead-scrubber",
+        script: "scripts/mca_lead_scrubber.py",
+        args: ["loop", "--interval", "120"],
+        interpreter: PYTHON,
+        cwd: PROJECT_ROOT,
+        watch: false,
+        autorestart: true,
+        max_restarts: 20,
+        restart_delay: 30000,
+        env: {
+            PYTHONIOENCODING: "utf-8",
+            PYTHONUNBUFFERED: "1",
+            BRAVO_AGENT_ROOT: BRAVO_ROOT,
+        },
+        log_date_format: "YYYY-MM-DD HH:mm:ss",
+        error_file: "tmp/pm2-mca-lead-scrubber-error.log",
+        out_file: "tmp/pm2-mca-lead-scrubber-out.log",
+        merge_logs: true,
+        max_size: "10M",
+    });
+}
+
 module.exports = { apps };
