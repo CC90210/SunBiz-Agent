@@ -32,9 +32,10 @@ THE FLOW (end to end)
 
 ALREADY DONE (verify only — do NOT redo)
   - DB migration 081 (scrub_candidates) is APPLIED to the bravo Supabase.
-  - Code is on branch: feat/breeze-uw-entry-sheet
-  - Frontend (oasis-command-center, branch feat/uw-sheet-stage-and-approval) ships via Vercel:
-    it adds the "Live Subs" pipeline stage + both workers to the Automations tab.
+  - Backend code is MERGED TO main (SunBiz-Agent) — pull main, no feature branch needed.
+  - Frontend is LIVE (deployed 2026-06-30, oasis-command-center main → Vercel): the
+    "Live Subs" (uw_sheet) stage renders in the Lead Pipeline above Hot Lead, and both
+    workers are registered in the Automations tab. Nothing to deploy on the frontend.
 
 PATHS
   - Repo:  /srv/sunbiz/sunbiz-agent
@@ -49,7 +50,7 @@ REQUIRED ENV (CC has these on the Mac — copy the SAME values into the agent en
 
 STEPS
   1. cd /srv/sunbiz/sunbiz-agent
-     git fetch --all && git checkout feat/breeze-uw-entry-sheet && git pull
+     git fetch --all && git checkout main && git pull   # backend is merged to main
   2. PY=/srv/sunbiz/ceo-agent/.venv/bin/python
      $PY -m pip install -r requirements.txt
      # installs: openpyxl, google-auth, google-api-python-client, google-auth-oauthlib
