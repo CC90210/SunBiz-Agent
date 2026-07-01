@@ -38,7 +38,8 @@ def _has_any(text: Any, needles: list[str]) -> bool:
 
 def score_uw_deal(parsed: dict[str, Any], cfg: dict[str, Any]) -> ScoreResult:
     uw = cfg.get("uw", {})
-    min_rev = float(uw.get("min_true_revenue_monthly", 80000))
+    min_rev = float(uw.get("min_true_revenue_monthly", 70000))
+    industry_floors = {str(k).lower(): float(v) for k, v in (uw.get("industry_min_revenue") or {}).items()}
     max_lev = float(uw.get("max_active_leverage_pct", 40))
     max_pos = int(uw.get("max_active_positions", 4))
     restricted = [s.lower() for s in uw.get("restricted_industries", [])]
@@ -58,11 +59,18 @@ def score_uw_deal(parsed: dict[str, Any], cfg: dict[str, Any]) -> ScoreResult:
     declines: list[str] = []
     unknowns: list[str] = []
 
-    # ── revenue ──
+    # ── revenue (industry-specific floor; construction $80k, others $70k) ──
+    eff_min_rev = min_rev
+    floor_industry = None
+    for ind_key, floor in industry_floors.items():
+        if _has_any(industry, [ind_key]):
+            eff_min_rev, floor_industry = floor, ind_key
+            break
     if true_rev is None:
         unknowns.append("true revenue unknown")
-    elif true_rev < min_rev:
-        declines.append(f"true revenue ${int(true_rev):,}/mo < ${int(min_rev):,}")
+    elif true_rev < eff_min_rev:
+        tag = f" ({floor_industry} floor)" if floor_industry else ""
+        declines.append(f"true revenue ${int(true_rev):,}/mo < ${int(eff_min_rev):,}{tag}")
     else:
         reasons.append(f"true revenue ${int(true_rev):,}/mo")
 
