@@ -79,7 +79,13 @@ const apps = [];
 // stage-change drip fires "within a couple seconds" without slamming
 // agent_events with a poll storm. Cursor in state/sequence_runner.cursor
 // so restarts don't re-enroll.
-apps.push({
+//
+// VPS-ONLY (IS_LINUX), added 2026-07-01: the always-on Linux host owns this
+// daemon so drips fire 24/7 independent of CC's Windows PC, and exactly ONE
+// instance runs (no double-send). Was previously ungated + only ever started on
+// the Windows PC, so with that PC off it ran nowhere and NO stage automations
+// fired. Start on the VPS with `pm2 start ecosystem.config.js`.
+if (IS_LINUX) apps.push({
     name: "sunbiz-sequence-runner",
     script: "scripts/sequence_runner.py",
     args: ["loop", "--interval", "10"],
@@ -122,7 +128,8 @@ apps.push({
 // Gmail thread fetch + Claude classification per pending thread.
 // Operators can run with --interval 60 for tighter responsiveness
 // during a busy submission day.
-apps.push({
+// VPS-ONLY (IS_LINUX), 2026-07-01 — always-on host owns it, single instance.
+if (IS_LINUX) apps.push({
     name: "sunbiz-lender-response-classifier",
     script: "scripts/lender_response_classifier.py",
     args: ["loop", "--interval", "300"],
@@ -154,7 +161,8 @@ apps.push({
 // (email + SMS via TextTorrent/Twilio; provider derived from the campaign
 // channel). daily-cap enforced in BOTH the runner and send_gateway (defense
 // in depth). 30s tick; restart_delay 30000ms so a crash-loop backs off.
-apps.push({
+// VPS-ONLY (IS_LINUX), 2026-07-01 — always-on host owns it, single instance.
+if (IS_LINUX) apps.push({
     name: "sunbiz-cold-outreach-runner",
     script: "scripts/cold_outreach_runner.py",
     args: ["loop", "--interval", "30"],
