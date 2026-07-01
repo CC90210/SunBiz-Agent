@@ -60,6 +60,31 @@ SEQUENCES: list[dict] = [
         ],
     },
     {
+        # UW Sheet first-touch — mirrors "UW Sheet — qualified-deal first touch"
+        # in lib/sunbiz-default-sequences.ts. Fires when Solara's scrubber lands
+        # a qualified MCA deal in uw_sheet (post-Ezra approval).
+        "name": "UW Sheet — qualified-deal first touch",
+        "description": "Fires when a scrubbed MCA deal lands in uw_sheet (post-Ezra approval). 3-touch SMS+email first-contact cadence to book a call and collect bank statements.",
+        "trigger_event": "BRAVO_RECORD_STATUS_CHANGED",
+        "trigger_filter": {"entity": "lead", "field": "stage", "to": "uw_sheet"},
+        "one_per_lead": True,
+        "enabled": True,
+        "steps": [
+            {"channel": "sms", "delay_minutes": 10, "from_label": "Solara"},
+            {"channel": "email", "delay_minutes": 60 * 24, "from_label": "Solara"},
+            {"channel": "sms", "delay_minutes": 60 * 24 * 3, "from_label": "Solara"},
+        ],
+    },
+    # ⚠️ PRE-EXISTING DRIFT (flagged 2026-06-30, NOT fixed here per RULE 10 —
+    # propose-then-edit shared infra): the two entries below target lead stages
+    # that no longer exist. `submitted` was removed and `declined` was retargeted
+    # to `ghost` ("Ghost — 1-month check-back") in lib/sunbiz-default-sequences.ts
+    # on 2026-06-18. Running reconcile re-creates these dead-stage drips. They
+    # never fire (no lead reaches those stages) so they're inert, but the mirror
+    # is stale. CC: decide whether to retarget `declined`→`ghost` + drop
+    # `submitted` here to match the TS source. Left untouched to avoid a
+    # unilateral shared-tool rewrite.
+    {
         "name": "Submitted — underwriting wait",
         "description": "Fires when a lead's application is fully submitted. Sets expectations + asks them to stay reachable.",
         "trigger_event": "BRAVO_RECORD_STATUS_CHANGED",

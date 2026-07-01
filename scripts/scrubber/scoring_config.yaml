@@ -1,0 +1,111 @@
+# ════════════════════════════════════════════════════════════════════════
+#  Sift MCA Lead Scrubber — scoring config
+#  ⚠️  PROVISIONAL / PLACEHOLDER — NOT the production deal-selection logic.
+# ════════════════════════════════════════════════════════════════════════
+#
+#  The REAL thresholds, weights, and the "previously submitted" rule come
+#  from CC's forthcoming underwriting SOP. Until then these conservative
+#  placeholders (drawn from ~/SunBiz-Agent/CONTEXT.md:62-88) exist ONLY to
+#  prove the end-to-end wiring. Editing THIS file re-tunes scoring with ZERO
+#  code change — bump `version` so re-scores are auditable.
+#
+#  How scoring works (see scoring.py):
+#    1. PRE-FILTERS run first (cheap, deterministic). Any fail → tier "bad",
+#       Claude is never called.
+#    2. WEIGHTS produce an additive 0-100 score → tier via `tiers`.
+#    3. Claude tie-break (optional) only runs for `review`-tier leads, and
+#       only when claude.enabled is true (it is FALSE in v1).
+# ════════════════════════════════════════════════════════════════════════
+
+version: "0.1-placeholder"
+
+# Is the sheet "Revenue" column MONTHLY or ANNUAL revenue?  ⚠️ MUST be
+# confirmed by the SOP. Analysis of the live sheets (values ~$36k-$3.2M with
+# daily/weekly MCA payments of $100-$8000) strongly implies MONTHLY. Note
+# import_mca_leads.py historically treats it as ANNUAL (monthly = rev/12);
+# Sift computes its own monthly figure from this setting and does NOT trust
+# that field for leverage.
+revenue_basis: monthly        # monthly | annual
+
+# ── 1. PRE-FILTERS (deterministic hard declines) ────────────────────────
+prefilters:
+  max_nsf_90d: 5              # CONTEXT.md: >5 NSF / 90 days = decline
+  max_leverage_pct: 45       # CONTEXT.md: >40-45% = overleveraged
+  max_positions: 4           # MCA stack-depth ceiling (4 = "4th or more")
+  min_monthly_revenue: 15000 # floor below which most funders won't price
+  declined_states: []        # lender geo exclusions (SOP-fed)
+
+# ── 2. WEIGHTS (additive, 0-100) ────────────────────────────────────────
+weights:
+  paper_grade:               # CONTEXT.md A/B/C/D matrix
+    A: 30
+    B: 22
+    C: 12
+    D: 0
+  leverage_pct:              # lower leverage = healthier merchant
+    lt_20: 20                # < 20%
+    lt_35: 12                # 20-35%
+    lt_45: 4                 # 35-45%
+    gte_45: 0                # >= 45% (also a pre-filter decline)
+  positions:                 # fewer existing positions = cleaner deal
+    "0": 20
+    "1": 15
+    "2": 8
+    "3": 3
+    "4": 0
+  monthly_revenue:           # higher revenue band = more fundable
+    gte_100000: 15
+    gte_50000: 10
+    gte_25000: 5
+  # CC's #1 good-deal signal. Weighted high. Sourced per `previously_submitted`
+  # below. Absent → contributes 0 (never an error).
+  previously_submitted: 25
+
+# ── 3. TIER MAPPING (score → tier) ──────────────────────────────────────
+tiers:
+  good_min: 70               # >= 70  → good   (queue for Ezra as a strong yes)
+  review_min: 45             # 45-69  → review (Ezra reviews; Claude may weigh in)
+  # < 45                     → bad    (not surfaced unless gate says otherwise)
+
+# ── "previously submitted" resolution (SOP will finalize) ───────────────
+previously_submitted:
+  # how to obtain the flag, in priority order:
+  #   sheet_column  — read a column named like "previously submitted" if present
+  #   crm_derived   — true if this merchant already exists in the SunBiz CRM
+  #   sop_rule      — (future) a static rule the SOP defines
+  source: crm_derived        # sheet_column | crm_derived | sop_rule | off
+  sheet_column_aliases: ["previously_submitted", "previously submitted", "prev submitted", "resubmit"]
+
+# ── 4. CLAUDE TIE-BREAK (off in v1) ─────────────────────────────────────
+claude:
+  enabled: false             # v1 = pure heuristic. Turn on after SOP lands.
+  model: claude-haiku-4-5-20251001
+  only_for_tier: ["review"]  # cost control: never call Claude on good/bad
+
+# ── 5. AUTONOMY GATE (Ezra is the approver) ─────────────────────────────
+gate:
+  # require_ezra        — EVERY candidate waits for Ezra's approve/decline (DEFAULT)
+  # auto_good_queue_review — good-tier auto-pushes; review waits for Ezra
+  # fully_autonomous    — everything >= review auto-pushes (no human gate)
+  mode: require_ezra
+
+# ── 6. BREEZE UW SHEET RULES (CC, 2026-06-30) ───────────────────────────
+# Consumed by scrubber/uw_scoring.py (the per-deal scorer). These are the REAL
+# rules (validated against Eagle Metal + Metrocity), not the placeholder above.
+uw:
+  min_true_revenue_monthly: 80000   # True Revenue (col H average) floor
+  max_active_leverage_pct: 40       # cap on active daily/weekly-funder leverage
+  max_active_positions: 4           # >4 active funders OK ONLY if under the cap
+  restricted_industries:            # any of these → hard decline
+    - trucking
+    - accounting
+    - law
+    - transportation
+    - cannabis
+    - auto sales
+    - solar
+  blocked_iso:                      # ISO/broker shops we never work
+    - nationwide advance
+  funder_tiers:                     # for the funder-research / matching layer
+    A: ["specialty capital", "altfunding", "alt funding"]
+    B: ["mulligan"]

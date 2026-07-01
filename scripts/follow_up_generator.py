@@ -61,7 +61,7 @@ DAEMON_NAME = "follow_up_generator"
 # intent_inquiry_submitted (2026-06-17) is the new first stage for form-submit
 # inquiries — a brand-new inquiry with no contact yet is exactly something the
 # operator should follow up on, so it's an active early-funnel stage alongside hot_lead.
-STALE_LEAD_STAGES = {"intent_inquiry_submitted", "hot_lead", "missing_info", "follow_ups"}
+STALE_LEAD_STAGES = {"intent_inquiry_submitted", "hot_lead", "missing_info", "uw_sheet", "follow_ups"}
 LEAD_STALE_DAYS = 3
 
 # Applications in these statuses that haven't progressed in APP_STUCK_DAYS get a task.
@@ -73,6 +73,10 @@ _STAGE_REASON: dict[str, str] = {
     "intent_inquiry_submitted": "stalled",  # new inquiry sitting uncontacted → nudge
     "hot_lead": "stalled",
     "missing_info": "missing_info",
+    # uw_sheet (2026-06-30): scrubbed deal Ezra just approved into the pipeline.
+    # Keep it alive — a UW-Sheet lead with no contact for LEAD_STALE_DAYS is
+    # exactly what the follow-up machine should nudge (book call / get statements).
+    "uw_sheet": "stalled",
     "follow_ups": "no_response",
 }
 
