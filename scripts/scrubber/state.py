@@ -178,11 +178,28 @@ def claim_path() -> Path:
     return _STATE_DIR / "scrubber.claim"
 
 
+def _pid_alive(pid: Any) -> bool:
+    """True only if `pid` is a live process. Lets us reclaim a claim the instant
+    the holder dies, instead of waiting out the whole stale TTL — otherwise every
+    `pm2 restart` blacks the worker out for up to stale_seconds."""
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, just not ours to signal
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def acquire_claim(stale_seconds: int = 600) -> bool:
     """Best-effort single-instance guard. Writes a claim file with this
-    PID + timestamp. Returns False if a FRESH claim by another PID exists
-    (another Sift instance is running). A claim older than stale_seconds is
-    considered crashed and reclaimed."""
+    PID + timestamp. Returns False only if another instance is BOTH still
+    alive AND fresh. A claim whose holder PID is dead is reclaimed immediately;
+    a claim older than stale_seconds (hung holder) is also reclaimed."""
     _STATE_DIR.mkdir(parents=True, exist_ok=True)
     p = claim_path()
     try:
@@ -196,7 +213,8 @@ def acquire_claim(stale_seconds: int = 600) -> bool:
                 except Exception:  # noqa: BLE001
                     age = None
             other_pid = rec.get("pid")
-            if other_pid != os.getpid() and (age is None or age < stale_seconds):
+            fresh = age is None or age < stale_seconds
+            if other_pid != os.getpid() and _pid_alive(other_pid) and fresh:
                 return False
     except Exception:  # noqa: BLE001
         pass  # unreadable claim → take it
