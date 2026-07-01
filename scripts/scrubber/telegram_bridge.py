@@ -247,10 +247,27 @@ def inject_lead(sb, lead_data: dict[str, Any]) -> Optional[str]:
     return lead_id
 
 
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+
+def _fetch_candidate(sb, candidate_id: str) -> Optional[dict[str, Any]]:
+    """Return the candidate row (or None) WITHOUT raising on not-found.
+
+    Two traps this avoids, both of which crash-looped the poller before:
+      • a non-uuid callback id (e.g. the 'TEST' packet) → PostgREST 400 on the
+        uuid cast — guarded here by shape-checking before we ever query;
+      • `.maybe_single()` on zero rows → PostgREST 204 which supabase-py raises
+        as APIError('Missing response') — avoided by using `.limit(1)` + list."""
+    if not _UUID_RE.match((candidate_id or "").strip()):
+        return None
+    res = sb.table("scrub_candidates").select("id, status, lead_data").eq("id", candidate_id).limit(1).execute()
+    rows = res.data or []
+    return rows[0] if rows else None
+
+
 def approve_candidate(sb, candidate_id: str, reviewer: str = "ezra-telegram") -> tuple[bool, Optional[str], str]:
     """Approve → inject the lead + flip the candidate. Returns (ok, lead_id, msg)."""
-    r = sb.table("scrub_candidates").select("id, status, lead_data").eq("id", candidate_id).maybe_single().execute()
-    cand = r.data
+    cand = _fetch_candidate(sb, candidate_id)
     if not cand:
         return False, None, "not found"
     if cand["status"] != "pending_review":
@@ -271,15 +288,66 @@ def approve_candidate(sb, candidate_id: str, reviewer: str = "ezra-telegram") ->
 
 
 def decline_candidate(sb, candidate_id: str, reviewer: str = "ezra-telegram") -> bool:
+    if not _UUID_RE.match((candidate_id or "").strip()):
+        return False
     upd = sb.table("scrub_candidates").update(
         {"status": "declined", "reviewed_by": reviewer, "reviewed_at": _now(), "updated_at": _now()}
     ).eq("id", candidate_id).eq("status", "pending_review").execute()
-    return bool(upd.data is not None)
+    # Truthy only when a pending_review row was actually flipped (0-row update →
+    # empty list → False → "already handled", not a crash).
+    return bool(upd.data)
+
+
+def _answer(env: dict[str, str], cqid: Optional[str], text: str) -> None:
+    """Answer a callback query so the button stops spinning. Best-effort."""
+    if cqid:
+        api(env, "answerCallbackQuery", {"callback_query_id": cqid, "text": text})
+
+
+def _edit(env: dict[str, str], chat, mid, base: str, suffix: str) -> None:
+    if chat and mid:
+        api(env, "editMessageText", {"chat_id": chat, "message_id": mid,
+            "text": (base or "") + suffix, "parse_mode": "Markdown"})
+
+
+def handle_callback(env: dict[str, str], sb, cq: dict[str, Any]) -> None:
+    """Act on ONE Approve/Deny tap. Always answers the callback (so the button
+    never buffers), and treats a stale/duplicate/non-uuid id as a graceful
+    'already handled' rather than an error — the DB helpers no longer raise."""
+    data = cq.get("data", "") or ""
+    cqid = cq.get("id")
+    msg = cq.get("message", {}) or {}
+    chat = (msg.get("chat") or {}).get("id")
+    mid = msg.get("message_id")
+    base = msg.get("text") or ""
+    if ":" not in data:
+        _answer(env, cqid, "unrecognized")
+        return
+    action, cid = data.split(":", 1)
+    if action == "approve":
+        ok, lead_id, m = approve_candidate(sb, cid)
+        _answer(env, cqid, "✅ Approved" if ok else f"⚠ {m}")
+        if ok:
+            _edit(env, chat, mid, base, "\n\n✅ *APPROVED* → injected to Live Subs")
+        print(f"[ezra-bridge] approve {cid}: ok={ok} lead={lead_id} {m}")
+    elif action == "deny":
+        ok = decline_candidate(sb, cid)
+        _answer(env, cqid, "❌ Denied" if ok else "⚠ already handled")
+        if ok:
+            _edit(env, chat, mid, base, "\n\n❌ *DENIED*")
+        print(f"[ezra-bridge] deny {cid}: ok={ok}")
+    else:
+        _answer(env, cqid, "unrecognized")
 
 
 def poll_loop(env: dict[str, str], sb) -> None:
     """Long-poll getUpdates for Ezra's Approve/Deny taps and act on them.
-    callback_data is 'approve:<candidate_id>' / 'deny:<candidate_id>'."""
+    callback_data is 'approve:<candidate_id>' / 'deny:<candidate_id>'.
+
+    Every update is processed inside a try/except: one malformed or stale tap
+    can NEVER crash the poller (which would make PM2 restart it, re-fetch the
+    same buffered tap, and crash-loop). On any unexpected error we still answer
+    the callback so Ezra's button never spins forever."""
     me = api(env, "getMe")
     print(f"[ezra-bridge] polling as @{me.get('result', {}).get('username')} (ok={me.get('ok')})")
     offset: Optional[int] = None
@@ -293,29 +361,11 @@ def poll_loop(env: dict[str, str], sb) -> None:
             cq = u.get("callback_query")
             if not cq:
                 continue
-            data = cq.get("data", "") or ""
-            cqid = cq.get("id")
-            msg = cq.get("message", {}) or {}
-            chat = (msg.get("chat") or {}).get("id")
-            mid = msg.get("message_id")
-            if ":" not in data:
-                api(env, "answerCallbackQuery", {"callback_query_id": cqid, "text": "unrecognized"})
-                continue
-            action, cid = data.split(":", 1)
-            if action == "approve":
-                ok, lead_id, m = approve_candidate(sb, cid)
-                api(env, "answerCallbackQuery", {"callback_query_id": cqid, "text": "✅ Approved" if ok else f"⚠ {m}"})
-                if ok and chat and mid:
-                    api(env, "editMessageText", {"chat_id": chat, "message_id": mid,
-                        "text": (msg.get("text") or "") + "\n\n✅ *APPROVED* → injected to Live Subs", "parse_mode": "Markdown"})
-                print(f"[ezra-bridge] approve {cid}: ok={ok} lead={lead_id} {m}")
-            elif action == "deny":
-                ok = decline_candidate(sb, cid)
-                api(env, "answerCallbackQuery", {"callback_query_id": cqid, "text": "❌ Denied"})
-                if chat and mid:
-                    api(env, "editMessageText", {"chat_id": chat, "message_id": mid,
-                        "text": (msg.get("text") or "") + "\n\n❌ *DENIED*", "parse_mode": "Markdown"})
-                print(f"[ezra-bridge] deny {cid}: ok={ok}")
+            try:
+                handle_callback(env, sb, cq)
+            except Exception as e:  # noqa: BLE001 — a bad tap must not kill the poller
+                print(f"[ezra-bridge] update {u.get('update_id')} error: {e}", file=sys.stderr)
+                _answer(env, cq.get("id"), "⚠ error — logged")
 
 
 def _sample_candidate() -> dict[str, Any]:
