@@ -71,6 +71,10 @@ def _pct(v: Any) -> Optional[float]:
 def _str(v: Any) -> Optional[str]:
     if v is None:
         return None
+    # openpyxl returns whole-number cells (EIN, SSN, zip, DL, routing) as floats
+    # like 464874703.0 — render the integer, not the ".0" artifact.
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
     s = str(v).strip()
     return s or None
 
