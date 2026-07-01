@@ -211,6 +211,12 @@ if (IS_LINUX) {
             PYTHONIOENCODING: "utf-8",
             PYTHONUNBUFFERED: "1",
             BRAVO_AGENT_ROOT: BRAVO_ROOT,
+            // Go-live gate for the per-deal UW Sheet parse+score+send. Designed to
+            // live in .env.agents (SIFT_PARSER_READY=1) so it's toggleable without a
+            // code edit, but the secret file is guard-protected from the agent, so we
+            // set it here — the scrubber reads it via os.environ fallback. To pause
+            // scoring without stopping the worker, flip this to "0" and `pm2 restart`.
+            SIFT_PARSER_READY: "1",
         },
         log_date_format: "YYYY-MM-DD HH:mm:ss",
         error_file: "tmp/pm2-mca-lead-scrubber-error.log",

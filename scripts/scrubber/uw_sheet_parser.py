@@ -101,6 +101,79 @@ def _right_of(ws, idx: dict, label: str) -> Any:
     return ws.cell(r, c + 1).value
 
 
+def _find_all(ws, label: str, max_row: int = 95, max_col: int = 30) -> list[tuple[int, int]]:
+    """All (row, col) cells whose stripped string equals `label`."""
+    hits: list[tuple[int, int]] = []
+    for row in ws.iter_rows(min_row=1, max_row=min(max_row, ws.max_row or max_row), max_col=max_col):
+        for c in row:
+            if isinstance(c.value, str) and c.value.strip() == label:
+                hits.append((c.row, c.column))
+    return hits
+
+
+def _first_nonempty_right(ws, label: str) -> Any:
+    """Value right of the first occurrence of `label` whose neighbor is non-empty.
+    Fixes duplicate-label bugs — e.g. 'Industry' appears twice (a blank header
+    row + the real value row); the plain first-occurrence lookup returned blank."""
+    for r, c in _find_all(ws, label):
+        v = ws.cell(r, c + 1).value
+        if v not in (None, ""):
+            return v
+    return None
+
+
+def _parse_personal_block(ws) -> dict[str, Any]:
+    """Parse the Jotform/personal block: col A = source tag, col B = LABEL,
+    col C = VALUE (distinct from the left block's col-A/col-B form). This is
+    where the merchant PII lives — owner name, SSN, home + business address,
+    DBA, entity type, DL, 2nd owner, bank. Address sub-fields (City/State/Zip
+    repeat for business AND home) are read by VERIFIED offset beneath their
+    anchor label so the duplicated labels can't collide."""
+    labelB: dict[str, int] = {}
+    scan_to = min(ws.max_row or 95, 95)
+    for r in range(1, scan_to + 1):
+        b = ws.cell(r, 2).value
+        if isinstance(b, str) and b.strip():
+            labelB.setdefault(b.strip(), r)
+
+    def C(row: Optional[int]) -> Optional[str]:
+        return _str(ws.cell(row, 3).value) if row else None
+
+    def by_label(lbl: str) -> Optional[str]:
+        return C(labelB.get(lbl))
+
+    def offset(anchor: str, delta: int, expect: str) -> Optional[str]:
+        r = labelB.get(anchor)
+        if not r:
+            return None
+        rr = r + delta
+        return C(rr) if _str(ws.cell(rr, 2).value) == expect else None
+
+    return {
+        "dba": by_label("DBA"),
+        "ein": by_label("Federal Tax ID"),
+        "entity_type": by_label("Type a entity"),
+        "business_address": by_label("Business Address"),
+        "business_city": offset("Business Address", 1, "City"),
+        "business_zip": offset("Business Address", 2, "Zip"),
+        "home_address": by_label("Home Address"),
+        "home_city": offset("Home Address", 1, "City"),
+        "home_state": offset("Home Address", 2, "State (2 Letters ONLY)"),
+        "home_zip": offset("Home Address", 3, "Zip"),
+        "email": by_label("Email"),
+        "phone": by_label("Phone"),
+        "owner_first": by_label("Owner First Name"),
+        "owner_last": by_label("Owner Last Name"),
+        "ssn": by_label("SSN"),
+        "drivers_license": by_label("Driver's License"),
+        "second_owner_name": by_label("2nd Owner Full Name"),
+        "second_owner_ssn": by_label("2nd Owner SSN"),
+        "bank_name": by_label("Business Bank Name"),
+        "routing_number": by_label("Routing Number"),
+        "checking_account": by_label("Checking Account"),
+    }
+
+
 # ── positions box ──────────────────────────────────────────────────────────
 
 def is_active_position(p: dict[str, Any]) -> bool:
@@ -187,7 +260,9 @@ def parse_uw_sheet(workbook) -> dict[str, Any]:
     data_merge = _str(_right_of(ws, idx, "Data Merch Notes"))
     nyscef = _str(_right_of(ws, idx, "NYSCEF Notes"))
     tib = _str(_right_of(ws, idx, "TIB"))
-    industry = _str(_right_of(ws, idx, "Industry"))
+    # "Industry" appears twice (blank header row + real value row) — take the
+    # first NON-EMPTY, else the value is silently dropped.
+    industry = _str(_first_nonempty_right(ws, "Industry"))
     state = _str(_right_of(ws, idx, "State"))
     first_position = _str(_right_of(ws, idx, "1st Position"))
 
@@ -200,14 +275,15 @@ def parse_uw_sheet(workbook) -> dict[str, Any]:
         if "Monthly Leverage" in idx:
             monthly_lev_avg = _pct(ws.cell(avg_row, idx["Monthly Leverage"][1]).value)
 
-    # contact / entity (Jotform block) — best-effort, often partially filled
-    owner_first = _str(_right_of(ws, idx, "Owner First Name"))
-    owner_last = _str(_right_of(ws, idx, "Owner Last Name"))
+    # contact / entity / PII — the Jotform block (col B label → col C value).
+    pers = _parse_personal_block(ws)
+    owner_first = pers.get("owner_first")
+    owner_last = pers.get("owner_last")
     owner_name = " ".join(p for p in (owner_first, owner_last) if p) or None
-    email = _str(_right_of(ws, idx, "Email"))
-    phone = _str(_right_of(ws, idx, "Phone"))
-    ein = _str(_right_of(ws, idx, "Federal Tax ID"))
-    business_address = _str(_right_of(ws, idx, "Business Address"))
+    email = pers.get("email")
+    phone = pers.get("phone")
+    ein = pers.get("ein") or _str(_right_of(ws, idx, "Federal Tax ID"))
+    business_address = pers.get("business_address")
 
     positions = _parse_positions(ws, idx)
 
@@ -234,10 +310,28 @@ def parse_uw_sheet(workbook) -> dict[str, Any]:
         "state": state,
         "first_position": first_position,
         "owner_name": owner_name,
+        "owner_first": owner_first,
+        "owner_last": owner_last,
         "email": email,
         "phone": phone,
         "ein": ein,
         "business_address": business_address,
+        # full merchant PII block (see _parse_personal_block)
+        "dba": pers.get("dba"),
+        "entity_type": pers.get("entity_type"),
+        "business_city": pers.get("business_city"),
+        "business_zip": pers.get("business_zip"),
+        "home_address": pers.get("home_address"),
+        "home_city": pers.get("home_city"),
+        "home_state": pers.get("home_state"),
+        "home_zip": pers.get("home_zip"),
+        "ssn": pers.get("ssn"),
+        "drivers_license": pers.get("drivers_license"),
+        "second_owner_name": pers.get("second_owner_name"),
+        "second_owner_ssn": pers.get("second_owner_ssn"),
+        "bank_name": pers.get("bank_name"),
+        "routing_number": pers.get("routing_number"),
+        "checking_account": pers.get("checking_account"),
         "true_revenue_monthly": true_rev_avg,      # avg monthly True Revenue (col H)
         "sheet_monthly_leverage": monthly_lev_avg,  # the sheet's own avg (incl. monthly funders)
         "positions": positions,

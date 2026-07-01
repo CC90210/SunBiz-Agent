@@ -51,7 +51,14 @@ BRAVO_ROOT = bootstrap_bravo_path()
 from sunbiz_constants import SUNBIZ_TENANT_ID  # noqa: E402
 
 # Reuse the importer's parse/normalize machinery — do NOT re-implement.
-from import_mca_leads import read_rows, map_row_to_lead_data  # noqa: E402
+from import_mca_leads import (  # noqa: E402
+    read_rows,
+    map_row_to_lead_data,
+    hash_ssn,
+    normalize_phone,
+    normalize_email,
+    derive_timezone,
+)
 
 from scrubber import scoring, state as st, columns as cols  # noqa: E402
 
@@ -192,29 +199,80 @@ def _histogram(candidates: list[dict[str, Any]]) -> str:
 
 # ── tick (loop mode — Drive discovery) ──────────────────────────────────
 
+def _last4(v: Any) -> Optional[str]:
+    """Trailing 4 digits of any numeric-ish value (for masking bank accounts)."""
+    import re as _re
+    digits = _re.sub(r"\D", "", str(v)) if v else ""
+    return digits[-4:] if len(digits) >= 4 else None
+
+
 def build_lead_data(parsed: dict[str, Any], result: dict[str, Any], ref: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
     """Map a parsed UW Sheet + its score into the tenant_records.data shape for
-    the Command Centre lead (stage=uw_sheet). Drops empty values."""
+    the Command Centre lead (stage=uw_sheet). Carries the FULL merchant record —
+    business identity, owner/personal identity + contact, business AND home
+    addresses, and underwriting metrics — using the same canonical keys as the
+    CSV importer (import_mca_leads.map_row_to_lead_data). PII follows the house
+    rule: SSN + bank account are stored last-4 only (SSN also hashed when a full
+    number is present); raw SSN/account are never persisted. Drops empty values."""
     import re as _re
     nm = parsed.get("business_legal_name")
     m = _re.search(r"UW Sheet[_ ](\d+)", ref.get("name", "") or "")
     deal_id = m.group(1) if m else None
-    data = {
+
+    owner_name = parsed.get("owner_name")
+    email = normalize_email(parsed.get("email"))
+    phone = normalize_phone(parsed.get("phone"))
+    ssn_last4, ssn_hash = hash_ssn(parsed.get("ssn"))
+    so_ssn_last4, _ = hash_ssn(parsed.get("second_owner_ssn"))
+    business_state = parsed.get("state")
+
+    data: dict[str, Any] = {
+        # ── business identity ──
         "business_name": nm, "company": nm,
-        "name": parsed.get("owner_name") or nm,
-        "contact_name": parsed.get("owner_name"),
-        "email": parsed.get("email"), "phone": parsed.get("phone"),
-        "state": parsed.get("state"), "industry": parsed.get("industry"),
-        "ein": parsed.get("ein"), "business_address": parsed.get("business_address"),
+        "dba": parsed.get("dba"), "entity_type": parsed.get("entity_type"),
+        "industry": parsed.get("industry"), "ein": parsed.get("ein"),
+        "tib": parsed.get("tib"),
+        # ── owner / personal identity + contact ──
+        "name": owner_name or nm, "contact_name": owner_name,
+        "first_name": parsed.get("owner_first"), "last_name": parsed.get("owner_last"),
+        "email": email, "phone": phone,
+        "ssn_last4": ssn_last4,
+        "drivers_license": parsed.get("drivers_license"),
+        "second_owner_name": parsed.get("second_owner_name"),
+        "second_owner_ssn_last4": so_ssn_last4,
+        # ── business address ──
+        "business_address": parsed.get("business_address"),
+        "business_city": parsed.get("business_city"),
+        "business_state": business_state,
+        "business_zip": parsed.get("business_zip"),
+        # ── home / personal address ──
+        "home_address": parsed.get("home_address"),
+        "home_city": parsed.get("home_city"),
+        "home_state": parsed.get("home_state"),
+        "home_zip": parsed.get("home_zip"),
+        # ── canonical top-level address (importer convention) ──
+        # business state stays top-level `state` (drives funder rules, display,
+        # TCPA timezone); personal address fills the generic address fields.
+        "address": parsed.get("home_address") or parsed.get("business_address"),
+        "city": parsed.get("home_city") or parsed.get("business_city"),
+        "state": business_state,
+        "zip": parsed.get("home_zip") or parsed.get("business_zip"),
+        # ── banking (masked) ──
+        "bank_name": parsed.get("bank_name"),
+        "routing_number": parsed.get("routing_number"),
+        "bank_account_last4": _last4(parsed.get("checking_account")),
+        # ── pipeline ──
         "stage": "uw_sheet", "status": "new",
+        # ── underwriting metrics ──
         "monthly_revenue": parsed.get("true_revenue_monthly"),
         "true_revenue_monthly": parsed.get("true_revenue_monthly"),
         "mca_positions": parsed.get("position_count"),
         "leverage_ratio": parsed.get("leverage_pct"),
         "previously_submitted": parsed.get("previously_submitted"),
-        "iso_broker": parsed.get("iso_broker"), "tib": parsed.get("tib"),
+        "iso_broker": parsed.get("iso_broker"),
         "current_funders": parsed.get("counted_funders"),
         "uw_all_positions": parsed.get("positions"),
+        # ── provenance / audit ──
         "source": "breeze_uw_sheet", "source_deal_id": deal_id,
         "source_file": ref.get("name"), "source_file_id": ref.get("id"),
         "score": result["score"], "scrub_tier": result["tier"],
@@ -222,6 +280,11 @@ def build_lead_data(parsed: dict[str, Any], result: dict[str, Any], ref: dict[st
         "scrubbed_at": datetime.now(timezone.utc).isoformat(),
         "scoring_config_version": cfg.get("version"),
     }
+    if ssn_hash:  # only when a full SSN was present to hash
+        data["ssn_hash"] = ssn_hash
+    tz = derive_timezone(business_state) if business_state else None
+    if tz:
+        data["timezone"] = tz
     return {k: v for k, v in data.items() if v not in (None, "")}
 
 
