@@ -17,7 +17,7 @@
 #       only when claude.enabled is true (it is FALSE in v1).
 # ════════════════════════════════════════════════════════════════════════
 
-version: "0.2-cc-revenue-floors"
+version: "0.3-uniform-70k-floor"
 
 # Is the sheet "Revenue" column MONTHLY or ANNUAL revenue?  ⚠️ MUST be
 # confirmed by the SOP. Analysis of the live sheets (values ~$36k-$3.2M with
@@ -93,16 +93,16 @@ gate:
 # Consumed by scrubber/uw_scoring.py (the per-deal scorer). These are the REAL
 # rules (validated against Eagle Metal + Metrocity), not the placeholder above.
 uw:
-  # GENERAL revenue floor for every ALLOWED industry (i.e. any industry NOT in
+  # UNIFORM revenue floor for every ALLOWED industry (any industry NOT in
   # restricted_industries). True Revenue = the sheet's col-H "Average" row.
-  # CC (2026-07-01): under $70k/mo → automatic DISQUALIFY. Per-industry
-  # overrides below take precedence when the deal's industry matches.
+  # CC (2026-07-01, confirmed): under $70k/mo → automatic DISQUALIFY, applies to
+  # ALL allowed industries including construction (no per-industry exceptions).
   min_true_revenue_monthly: 70000
-  # Per-industry revenue floors (override the general floor above). Substring,
-  # case-insensitive match on the sheet's Industry value. CC (2026-06-30):
-  # construction must clear $80k/mo (stricter than the $70k general floor).
-  industry_min_revenue:
-    construction: 80000
+  # Per-industry revenue floor OVERRIDES (substring, case-insensitive match on
+  # the sheet's Industry value). Empty = every allowed industry uses the uniform
+  # floor above. Add entries here if CC later wants a stricter floor for a
+  # specific industry, e.g. {construction: 80000}.
+  industry_min_revenue: {}
   max_active_leverage_pct: 40       # cap on active daily/weekly-funder leverage
   max_active_positions: 4           # >4 active funders OK ONLY if under the cap
   restricted_industries:            # any of these → hard decline
