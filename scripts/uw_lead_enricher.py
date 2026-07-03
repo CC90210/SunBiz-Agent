@@ -697,6 +697,8 @@ def doctor(env: dict[str, str]) -> int:
     print(f"  Firecrawl tool:        {'present' if bravo and (bravo / 'scripts/integrations/firecrawl_tool.py').exists() else 'missing'}")
     print(f"  research_fetch tool:   {'present' if bravo and (bravo / 'scripts/research_fetch.py').exists() else 'missing'}")
     print(f"  Ezra Telegram config:  token={'set' if env.get('EZRA_TELEGRAM_BOT_TOKEN') else 'unset'} chat={'set' if env.get('EZRA_TELEGRAM_CHAT_ID') else 'unset'}")
+    print(f"  live-loop gate:        {'ENABLED (UW_ENRICH_READY=1)' if _live_enabled(env) else 'disabled — loop idles until UW_ENRICH_READY=1 (set_secret.py)'}")
+    print(f"  notify cap per pass:   {_max_notify(env) or 'unlimited'} (Ezra notices {'on' if _notify_enabled(env) else 'OFF — revive gate waived'})")
     if sb:
         leads = _fetch_candidate_leads(sb, 500)
         missing_contact = sum(1 for r in leads if not (_has_email(r.get("data") or {}) and _has_phone(r.get("data") or {})))
