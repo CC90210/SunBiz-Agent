@@ -526,15 +526,35 @@ def _max_notify(env: dict[str, str]) -> int:
         return 5
 
 
+def _notify_enabled(env: dict[str, str]) -> bool:
+    """Ezra verification notices on (default). Turning this off is an explicit
+    operator decision (UW_ENRICH_NOTIFY_EZRA=0) — it also waives the notify-before-
+    revive gate below, which is why it must never default off."""
+    return str(env.get("UW_ENRICH_NOTIFY_EZRA") or "1").strip().lower() not in ("0", "false", "no")
+
+
+def _live_enabled(env: dict[str, str]) -> bool:
+    """Approval gate for the autonomous loop (Codex audit P1, 2026-07-03): a bare
+    `pm2 start ecosystem.config.js` on the VPS starts EVERY registered app, which
+    would run live web lookups + DB writes + drip revivals before CC's dry-run
+    review. Mirrors the scrubber's SIFT_PARSER_READY pattern — the loop idles as a
+    no-op until CC sets UW_ENRICH_READY=1 (via scripts/set_secret.py) and restarts.
+    Manual `once` runs and `--dry-run` are operator-driven and stay ungated."""
+    return str(env.get("UW_ENRICH_READY") or "").strip() == "1"
+
+
 def process_once(sb, env: dict[str, str], *, dry_run: bool, limit: int, force_refresh: bool, skip_web: bool) -> dict[str, int]:
-    stats = {"seen": 0, "updated": 0, "sheet_refreshed": 0, "contact_found": 0, "events": 0, "revived": 0, "notified": 0, "notify_suppressed": 0, "errors": 0}
+    stats = {"seen": 0, "updated": 0, "sheet_refreshed": 0, "contact_found": 0, "contact_deferred": 0, "events": 0, "revived": 0, "notified": 0, "errors": 0}
     max_notify = _max_notify(env)
+    notify_on = _notify_enabled(env)
     for row in _fetch_candidate_leads(sb, limit):
         stats["seen"] += 1
         lead_id = row["id"]
         original = row.get("data") or {}
         data = dict(original)
         changed_keys: list[str] = []
+        sheet_contact_keys: list[str] = []
+        web_contact_keys: list[str] = []
 
         if force_refresh or _needs_sheet_refresh(data):
             fresh, _, err = _refresh_from_source_sheet(env, data)
@@ -545,20 +565,34 @@ def process_once(sb, env: dict[str, str], *, dry_run: bool, limit: int, force_re
                 sheet_changes = _merge_fill_only(data, fresh)
                 if sheet_changes:
                     changed_keys.extend(sheet_changes)
+                    # Sheet-sourced contact is merchant-provided (Jotform) — trusted
+                    # provenance, unlike web-scraped candidates below.
+                    sheet_contact_keys = [k for k in sheet_changes if k in ("email", "phone")]
                     stats["sheet_refreshed"] += 1
 
-        contact_incoming, contact_changed = _enrich_contact(data, skip_web=skip_web)
-        contact_fill = _merge_fill_only(data, contact_incoming)
-        if contact_changed:
-            changed_keys.extend(contact_changed)
-            stats["contact_found"] += 1
-        elif contact_fill:
-            changed_keys.extend(contact_fill)
+        # Ezra verification is a GATE for web-sourced contacts, not a courtesy ping
+        # (Codex audit P1, 2026-07-03). Past the per-pass notify cap we DEFER the web
+        # lookup entirely — no write, no revive — so a later pass (with cap headroom)
+        # sources AND notifies together. Never persist a scraped contact Ezra won't
+        # hear about. Dry runs are exempt: CC reviews the full candidate set.
+        over_cap = (not dry_run) and notify_on and max_notify > 0 and stats["notified"] >= max_notify
+        needs_web = not skip_web and not (_has_email(data) and _has_phone(data))
+        if over_cap and needs_web:
+            stats["contact_deferred"] += 1
+        else:
+            contact_incoming, contact_changed = _enrich_contact(data, skip_web=skip_web)
+            contact_fill = _merge_fill_only(data, contact_incoming)
+            if contact_changed:
+                changed_keys.extend(contact_changed)
+                web_contact_keys = [k for k in contact_changed if k in ("email", "phone")]
+                stats["contact_found"] += 1
+            elif contact_fill:
+                changed_keys.extend(contact_fill)
 
         if not changed_keys:
             continue
         data["uw_enriched_at"] = _now_iso()
-        data["uw_enrichment_version"] = "2026-07-02"
+        data["uw_enrichment_version"] = "2026-07-03"
 
         preview = ", ".join(sorted(set(changed_keys))[:8])
         contact_preview = _contact_preview(data, changed_keys)
@@ -570,27 +604,32 @@ def process_once(sb, env: dict[str, str], *, dry_run: bool, limit: int, force_re
         try:
             sb.table("tenant_records").update({"data": data}).eq("id", lead_id).eq("tenant_id", SUNBIZ_TENANT_ID).execute()
             stats["updated"] += 1
-            newly_contacted = any(k in ("email", "phone") for k in changed_keys)
-            if newly_contacted:
+            new_contact_keys = sheet_contact_keys + web_contact_keys
+            if new_contact_keys:
                 _publish_status_event(sb, lead_id, data)
                 stats["events"] += 1
-                stats["revived"] += _revive_missing_contact_steps(sb, lead_id, data)
-                # Data is written + drips revived regardless; only the Ezra ping is
-                # capped per pass to avoid a Telegram flood on the first backfill.
-                if max_notify == 0 or stats["notified"] < max_notify:
-                    if _notify_ezra(env, data, [k for k in changed_keys if k in ("email", "phone")]):
-                        stats["notified"] += 1
-                        _log(f"notified Ezra lead={lead_id}")
-                else:
-                    stats["notify_suppressed"] += 1
+                notified = False
+                if notify_on and _notify_ezra(env, data, new_contact_keys):
+                    stats["notified"] += 1
+                    notified = True
+                    _log(f"notified Ezra lead={lead_id}")
+                # Drip revival gate: sheet-sourced contact (merchant-provided) revives
+                # freely. Web-sourced contact revives ONLY if the Ezra notice actually
+                # went out — or the operator explicitly disabled notices — so failed
+                # outreach never silently restarts on an unverified scraped channel.
+                may_revive = bool(sheet_contact_keys) or (bool(web_contact_keys) and (notified or not notify_on))
+                if may_revive:
+                    stats["revived"] += _revive_missing_contact_steps(sb, lead_id, data)
+                elif web_contact_keys:
+                    _log(f"revive withheld lead={lead_id}: web-sourced contact but Ezra notice not confirmed")
             _log(f"updated lead={lead_id} fields={preview}")
         except Exception as exc:  # noqa: BLE001
             stats["errors"] += 1
             _log(f"update failed lead={lead_id}: {exc}")
-    if stats["notify_suppressed"]:
+    if stats["contact_deferred"]:
         _log(
-            f"suppressed {stats['notify_suppressed']} Ezra notice(s) this pass "
-            f"(cap={max_notify}) — data still written + drips still revived"
+            f"deferred web enrichment for {stats['contact_deferred']} lead(s) this pass "
+            f"(notify cap={max_notify}) — nothing written for them; next pass picks them up"
         )
     return stats
 
@@ -709,15 +748,22 @@ def main(argv: Optional[list[str]] = None) -> int:
     while True:
         try:
             refresh_claim()
-            stats = process_once(
-                sb,
-                env,
-                dry_run=args.dry_run,
-                limit=args.limit,
-                force_refresh=args.force_refresh,
-                skip_web=args.skip_web,
-            )
-            _log(f"loop stats={stats}")
+            if not args.dry_run and not _live_enabled(env):
+                _log(
+                    "live loop DISABLED — idling (no reads, no writes). To enable: set "
+                    "UW_ENRICH_READY=1 via scripts/set_secret.py, then "
+                    "`pm2 restart uw-lead-enricher --update-env`."
+                )
+            else:
+                stats = process_once(
+                    sb,
+                    env,
+                    dry_run=args.dry_run,
+                    limit=args.limit,
+                    force_refresh=args.force_refresh,
+                    skip_web=args.skip_web,
+                )
+                _log(f"loop stats={stats}")
         except Exception as exc:  # noqa: BLE001
             print(f"[uw-enricher] tick error: {exc}", file=sys.stderr)
         time.sleep(max(60, args.interval))

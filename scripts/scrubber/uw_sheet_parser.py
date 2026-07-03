@@ -83,6 +83,15 @@ def _is_yes(v: Any) -> bool:
     return _str(v) is not None and _str(v).strip().lower() in ("yes", "y", "true", "1")
 
 
+def _score_like(v: Any) -> bool:
+    """True when the cell plausibly carries a numeric credit score (a 3-digit
+    number in the 300-900 FICO range) rather than link/placeholder text."""
+    if v in (None, ""):
+        return False
+    m = re.search(r"\b(\d{3})\b", str(v))
+    return bool(m and 300 <= int(m.group(1)) <= 900)
+
+
 # ── locating labels ────────────────────────────────────────────────────────
 
 def _build_label_index(ws, max_row: int = 90, max_col: int = 30) -> dict[str, tuple[int, int]]:
@@ -311,7 +320,7 @@ def parse_uw_sheet(workbook) -> dict[str, Any]:
     # numeric score must come from enrichment, not the sheet. Kept as a best-effort
     # so that any template revision which DOES type a score is still captured; the
     # downstream _credit_score() sanitizer discards non-numeric values like "Link".
-    credit_score = _str(
+    credit_analysis = _str(
         _right_of(ws, idx, "Credit")
         or _right_of(ws, idx, "Credit Score")
         or _right_of(ws, idx, "FICO")
@@ -371,7 +380,15 @@ def parse_uw_sheet(workbook) -> dict[str, Any]:
         # the return so the shape is stable and future template revisions light up.
         "owner_dob": pers.get("dob"),
         "owner_citizenship": pers.get("citizenship"),
-        "credit_score": credit_score or pers.get("credit_score"),
+        # Prefer whichever source carries an actual NUMERIC score (Codex audit P2,
+        # 2026-07-03): truthy link text like "Link" in the analysis column must not
+        # shadow a real 720 typed in the personal block — the downstream sanitizer
+        # would discard the link text and lose the number.
+        "credit_score": (
+            credit_analysis if _score_like(credit_analysis)
+            else pers.get("credit_score") if _score_like(pers.get("credit_score"))
+            else credit_analysis or pers.get("credit_score")
+        ),
         "email": email,
         "phone": phone,
         "ein": ein,

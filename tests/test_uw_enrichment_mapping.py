@@ -72,4 +72,41 @@ def test_drive_discovery_excludes_non_deal_sheet_names() -> None:
     assert excluded_by_name(env, "Contracts Sent - July")
     assert excluded_by_name(env, "Notification Log")
     assert excluded_by_name(env, "Do Not Process")
+    assert excluded_by_name(env, "UW Sheet_123_moladds@gmail.com has signed your document")
+    assert excluded_by_name(env, "UW Sheet_123_You invited x@y.com to sign Breeze Advance LLC")
+    assert excluded_by_name(env, "UW Sheet_123_Breeze Advance LLC - RAY TEX INC Has Been Completed")
     assert not excluded_by_name(env, "UW Sheet_123_FROZEN ROPES")
+
+
+def test_parser_prefers_numeric_credit_over_link_text() -> None:
+    """Codex audit P2 (2026-07-03): truthy link text in the analysis column must not
+    shadow a real numeric score typed in the personal block."""
+    import openpyxl
+
+    from scrubber.uw_sheet_parser import parse_uw_sheet
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.cell(20, 1, "Credit")
+    ws.cell(20, 2, "Link")            # analysis column: Experian link placeholder
+    ws.cell(30, 2, "Credit Score")    # personal block: label col B → value col C
+    ws.cell(30, 3, "720")
+    assert parse_uw_sheet(wb)["credit_score"] == "720"
+
+    wb2 = openpyxl.Workbook()
+    ws2 = wb2.active
+    ws2.cell(20, 1, "Credit")
+    ws2.cell(20, 2, "680")            # numeric in the analysis column wins
+    assert parse_uw_sheet(wb2)["credit_score"] == "680"
+
+
+def test_enricher_notify_and_gate_env_parsing() -> None:
+    from uw_lead_enricher import _live_enabled, _max_notify, _notify_enabled
+
+    assert _max_notify({}) == 5                              # default cap
+    assert _max_notify({"UW_ENRICH_MAX_NOTIFY": "0"}) == 0   # 0 = unlimited
+    assert _max_notify({"UW_ENRICH_MAX_NOTIFY": "junk"}) == 5
+    assert _notify_enabled({})                               # notices default ON
+    assert not _notify_enabled({"UW_ENRICH_NOTIFY_EZRA": "0"})
+    assert not _live_enabled({})                             # loop gated by default
+    assert _live_enabled({"UW_ENRICH_READY": "1"})

@@ -73,7 +73,7 @@ STEP 3 — Redacted env audit (prints SET/MISSING + length only, never values)
       "EZRA_TELEGRAM_BOT_TOKEN","EZRA_TELEGRAM_CHAT_ID","SIFT_PARSER_READY",
   ]
   optional = ["SIFT_SHEET_OWNER","SIFT_SHEET_TITLE_HINT","SIFT_SHEET_EXCLUDE",
-              "UW_ENRICH_MAX_NOTIFY","FIRECRAWL_API_KEY"]
+              "UW_ENRICH_MAX_NOTIFY","UW_ENRICH_READY","FIRECRAWL_API_KEY"]
   def parse_env(p):
       d={}
       if not p.exists(): return d
@@ -146,20 +146,31 @@ STEP 6 — Read-only DB proof (no PII values)
 STEP 7 — Dry-run web enrichment → SHOW CC, then PAUSE
   Shows the email/phone the enricher WOULD source for contact-less leads, with
   confidence + source, WITHOUT writing anything and WITHOUT messaging Ezra.
+  (Dry runs show the FULL candidate set — the notify cap applies to live passes only.)
   PY=/srv/sunbiz/ceo-agent/.venv/bin/python
   cd /srv/sunbiz/sunbiz-agent
   $PY scripts/uw_lead_enricher.py once --dry-run --limit 500
   Present the dry-run lines to CC (they are masked previews). Then STOP and wait.
   Do NOT proceed to STEP 8 until CC says: "enable the enricher".
 
-STEP 8 — Enable the live loop (ONLY after CC says "enable the enricher")
-  cd /srv/sunbiz/sunbiz-agent
-  pm2 start ecosystem.config.js --only uw-lead-enricher
-  pm2 save
-  pm2 status
-  pm2 logs uw-lead-enricher --lines 30 --nostream
-  Expect: uw-lead-enricher online, not crash-looping; a loop tick with a stats line.
-  The per-pass Ezra cap defaults to 5 (override with UW_ENRICH_MAX_NOTIFY).
+STEP 8 — Enable the live loop (ONLY after CC says: "enable the enricher")
+  The loop is approval-gated: it IDLES as a no-op until UW_ENRICH_READY=1 exists in
+  .env.agents. Starting the PM2 app without the flag is safe but does nothing.
+  1. Have CC set the flag in the VPS terminal (hidden input; enter UW_ENRICH_READY
+     with value 1):
+       cd /srv/sunbiz/ceo-agent && .venv/bin/python scripts/set_secret.py
+  2. Then:
+       cd /srv/sunbiz/sunbiz-agent
+       pm2 start ecosystem.config.js --only uw-lead-enricher
+       pm2 restart uw-lead-enricher --update-env
+       pm2 save
+       pm2 status
+       pm2 logs uw-lead-enricher --lines 30 --nostream
+  Expect: uw-lead-enricher online, not crash-looping; a loop tick with a stats line
+  (NOT "live loop DISABLED — idling"). Live-pass behavior: per-pass Ezra notify cap
+  defaults to 5 (UW_ENRICH_MAX_NOTIFY); leads past the cap are DEFERRED whole to the
+  next pass (never written without a verification notice), and web-sourced contacts
+  revive failed drip steps only after the Ezra notice actually sends.
 
 STEP 9 — Autonomy proof
   cd /srv/sunbiz/sunbiz-agent

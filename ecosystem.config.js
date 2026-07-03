@@ -284,6 +284,12 @@ if (IS_LINUX) {
 // IS_LINUX-gated single instance. It pairs with mca-lead-scrubber and
 // ezra-telegram-bridge; running more than one copy could duplicate verification
 // notices and sequence revive attempts.
+//
+// APPROVAL GATE (Codex audit P1, 2026-07-03): the loop IDLES as a no-op until
+// UW_ENRICH_READY=1 is set in .env.agents (scripts/set_secret.py) and the app is
+// restarted with --update-env. A bare `pm2 start ecosystem.config.js` therefore
+// CANNOT start live web lookups / DB writes / drip revivals before CC's dry-run
+// review — same pattern as the scrubber's SIFT_PARSER_READY.
 if (IS_LINUX) {
     apps.push({
         name: "uw-lead-enricher",
