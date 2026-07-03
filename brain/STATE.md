@@ -24,10 +24,10 @@ tags: [state, ephemeral]
 | Dimension | Level | Notes |
 |-----------|-------|-------|
 | **Version** | V6.x Cognitive Substrate | Upgraded 2026-05-25 — Solara persona established |
-| **Position** | OPERATIONAL | Shop-out pipeline active |
-| **Confidence** | 0.70 | Substrate newly upgraded; baseline |
-| **Focus Area** | Deal throughput + renewal pipeline | Primary levers for funded volume |
-| **Memory Health** | INITIALIZED | V6.x brain files written; memory/ to be seeded |
+| **Position** | OPERATIONAL | Shop-out pipeline active; Breeze UW scrubber/Telegram bridge verified live; UW enrichment worker code-complete + dry-run verified 2026-07-02 |
+| **Confidence** | 0.86 | Live Drive auth, VPS bridge heartbeat, fresh scrub_candidates, Telegram approval history, and UW enrichment dry-runs verified |
+| **Focus Area** | Deal throughput + renewal pipeline | Start `uw-lead-enricher` on the VPS after controlled first live batch |
+| **Memory Health** | ACTIVE | Session log refreshed with 2026-07-02 live verification |
 
 ---
 
@@ -88,11 +88,11 @@ tags: [state, ephemeral]
 
 ## Last Heartbeat
 
-- **Date:** 2026-05-25
-- **Agent:** SOLARA via Claude Code (V6.x upgrade session)
-- **Result:** Cognitive substrate initialized. All 15 brain files written.
+- **Date:** 2026-07-02
+- **Agent:** BRAVO/Codex live verification from Windows, using SunBiz CLI tools
+- **Result:** Breeze UW extraction path verified: Drive discovery OK, VPS bridge heartbeat fresh, recent UW candidates staged, Telegram approval path has approved/declined history.
 
-*Last updated: 2026-05-25*
+*Last updated: 2026-07-02*
 
 ## Obsidian Links
 - [[brain/SOUL]] | [[brain/USER]] | [[brain/AGENTS]] | [[brain/CAPABILITIES]]

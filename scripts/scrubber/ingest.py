@@ -26,6 +26,7 @@ with import_mca_leads.read_rows() so column handling stays identical.
 from __future__ import annotations
 
 import io
+import os
 import tempfile
 from pathlib import Path
 from typing import Any, Optional
@@ -39,11 +40,31 @@ TOKEN_URI = "https://oauth2.googleapis.com/token"
 
 # Cache the built Drive client across calls within one process (one refresh).
 _DRIVE_SERVICE = None
+# Non-deal files that land in the shared Drive as "UW Sheet_<id>_<subject>" and
+# match the title hint but carry NO merchant data — DocuSign/e-sign notifications
+# ("X has signed your document", "You invited X to sign ...", "... Has Been
+# Completed") and contracts-sent/notification logs. Verified 2026-07-02 against a
+# live discovery scan (dozens of these per pass). Skipping them stops wasted ticks
+# and mis-parses. Override/extend via SIFT_SHEET_EXCLUDE (comma-separated).
+DEFAULT_SHEET_EXCLUDE = (
+    "contracts sent,notification,do not,"
+    "has signed,you invited,has been completed,signed your document"
+)
 
 
 def _missing_creds(env: dict[str, Any]) -> list[str]:
     keys = ["BREEZE_GOOGLE_CLIENT_ID", "BREEZE_GOOGLE_CLIENT_SECRET", "BREEZE_GOOGLE_REFRESH_TOKEN"]
     return [k for k in keys if not (env.get(k) or "").strip()]
+
+
+def _exclude_terms(env: dict[str, Any]) -> list[str]:
+    raw = (env.get("SIFT_SHEET_EXCLUDE") or os.environ.get("SIFT_SHEET_EXCLUDE") or DEFAULT_SHEET_EXCLUDE)
+    return [p.strip().lower() for p in str(raw).split(",") if p.strip()]
+
+
+def excluded_by_name(env: dict[str, Any], name: str) -> bool:
+    lowered = (name or "").lower()
+    return any(term in lowered for term in _exclude_terms(env))
 
 
 def drive_service(env: dict[str, Any], force: bool = False):
@@ -113,6 +134,8 @@ def discover_sheets(
             name = f.get("name", "") or ""
             mime = f.get("mimeType", "") or ""
             if mime not in (SHEET_MIME, XLSX_MIME):
+                continue
+            if excluded_by_name(env, name):
                 continue
             if hint and hint not in name.lower():
                 continue

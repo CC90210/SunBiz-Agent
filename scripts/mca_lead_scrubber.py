@@ -36,7 +36,7 @@ import os
 import sys
 import time
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -206,6 +206,90 @@ def _last4(v: Any) -> Optional[str]:
     return digits[-4:] if len(digits) >= 4 else None
 
 
+_STATE_NAME_TO_CODE = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
+    "district of columbia": "DC", "florida": "FL", "georgia": "GA", "hawaii": "HI",
+    "idaho": "ID", "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN", "mississippi": "MS",
+    "missouri": "MO", "montana": "MT", "nebraska": "NE", "nevada": "NV",
+    "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY",
+    "north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
+    "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
+    "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT",
+    "vermont": "VT", "virginia": "VA", "washington": "WA", "west virginia": "WV",
+    "wisconsin": "WI", "wyoming": "WY",
+}
+
+
+def _state_code(v: Any) -> Optional[str]:
+    if v in (None, ""):
+        return None
+    s = str(v).strip()
+    if len(s) == 2 and s.isalpha():
+        return s.upper()
+    return _STATE_NAME_TO_CODE.get(s.lower())
+
+
+def _date_iso(v: Any) -> Optional[str]:
+    if v in (None, ""):
+        return None
+    if isinstance(v, datetime):
+        return v.date().isoformat()
+    if isinstance(v, date):
+        return v.isoformat()
+    s = str(v).strip()
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00")).date().isoformat()
+    except ValueError:
+        pass
+    for fmt in ("%m/%d/%Y", "%m-%d-%Y", "%Y/%m/%d", "%B %d, %Y", "%b %d, %Y"):
+        try:
+            return datetime.strptime(s, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return None
+
+
+def _months_since(iso_date: Optional[str]) -> Optional[int]:
+    if not iso_date:
+        return None
+    try:
+        start = date.fromisoformat(iso_date)
+    except ValueError:
+        return None
+    today = datetime.now(timezone.utc).date()
+    months = (today.year - start.year) * 12 + (today.month - start.month)
+    if today.day < start.day:
+        months -= 1
+    return months if months >= 0 else None
+
+
+def _duration_label(months: Optional[int], fallback: Any = None) -> Optional[str]:
+    if months is None:
+        return str(fallback).strip() if fallback not in (None, "") else None
+    years, rem = divmod(months, 12)
+    if years and rem:
+        return f"{years} year{'s' if years != 1 else ''}, {rem} month{'s' if rem != 1 else ''}"
+    if years:
+        return f"{years} year{'s' if years != 1 else ''}"
+    return f"{rem} month{'s' if rem != 1 else ''}"
+
+
+def _credit_score(v: Any) -> Optional[int]:
+    if v in (None, ""):
+        return None
+    import re as _re
+    m = _re.search(r"\b(\d{3})\b", str(v))
+    if not m:
+        return None
+    n = int(m.group(1))
+    return n if 300 <= n <= 900 else None
+
+
 def build_lead_data(parsed: dict[str, Any], result: dict[str, Any], ref: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
     """Map a parsed UW Sheet + its score into the tenant_records.data shape for
     the Command Centre lead (stage=uw_sheet). Carries the FULL merchant record —
@@ -225,37 +309,56 @@ def build_lead_data(parsed: dict[str, Any], result: dict[str, Any], ref: dict[st
     ssn_last4, ssn_hash = hash_ssn(parsed.get("ssn"))
     so_ssn_last4, _ = hash_ssn(parsed.get("second_owner_ssn"))
     business_state = parsed.get("state")
+    business_state_code = _state_code(business_state)
+    business_start_date = _date_iso(parsed.get("tib"))
+    tib_months = _months_since(business_start_date)
+    owner_dob = _date_iso(parsed.get("owner_dob")) or parsed.get("owner_dob")
+    credit_score = _credit_score(parsed.get("credit_score"))
 
     data: dict[str, Any] = {
         # ── business identity ──
-        "business_name": nm, "company": nm,
+        "business_name": nm, "company": nm, "legal_name": nm, "business_legal_name": nm,
         "dba": parsed.get("dba"), "entity_type": parsed.get("entity_type"),
         "industry": parsed.get("industry"), "ein": parsed.get("ein"),
         "tib": parsed.get("tib"),
+        "business_start_date": business_start_date,
+        "time_in_business": _duration_label(tib_months, parsed.get("tib")),
+        "time_in_business_months": tib_months,
         # ── owner / personal identity + contact ──
-        "name": owner_name or nm, "contact_name": owner_name,
+        "name": owner_name or nm, "contact_name": owner_name, "owner_name": owner_name,
         "first_name": parsed.get("owner_first"), "last_name": parsed.get("owner_last"),
-        "email": email, "phone": phone,
-        "ssn_last4": ssn_last4,
+        "email": email, "phone": phone, "contact_email": email, "contact_phone": phone,
+        "owner_dob": owner_dob,
+        "owner_citizenship": parsed.get("owner_citizenship"),
+        "credit_score": credit_score,
+        "owner_credit_score": credit_score,
+        "ssn_last4": ssn_last4, "owner_ssn_last4": ssn_last4,
         "drivers_license": parsed.get("drivers_license"),
         "second_owner_name": parsed.get("second_owner_name"),
         "second_owner_ssn_last4": so_ssn_last4,
         # ── business address ──
         "business_address": parsed.get("business_address"),
+        "business_address_line1": parsed.get("business_address"),
         "business_city": parsed.get("business_city"),
         "business_state": business_state,
+        "business_state_code": business_state_code,
         "business_zip": parsed.get("business_zip"),
         # ── home / personal address ──
         "home_address": parsed.get("home_address"),
         "home_city": parsed.get("home_city"),
         "home_state": parsed.get("home_state"),
         "home_zip": parsed.get("home_zip"),
+        "owner_address_line1": parsed.get("home_address"),
+        "owner_address_city": parsed.get("home_city"),
+        "owner_address_state": parsed.get("home_state"),
+        "owner_address_zip": parsed.get("home_zip"),
         # ── canonical top-level address (importer convention) ──
         # business state stays top-level `state` (drives funder rules, display,
         # TCPA timezone); personal address fills the generic address fields.
         "address": parsed.get("home_address") or parsed.get("business_address"),
         "city": parsed.get("home_city") or parsed.get("business_city"),
         "state": business_state,
+        "state_code": business_state_code,
         "zip": parsed.get("home_zip") or parsed.get("business_zip"),
         # ── banking (masked) ──
         "bank_name": parsed.get("bank_name"),
@@ -264,9 +367,14 @@ def build_lead_data(parsed: dict[str, Any], result: dict[str, Any], ref: dict[st
         # ── pipeline ──
         "stage": "uw_sheet", "status": "new",
         # ── underwriting metrics ──
+        # Command-Centre tiles read `avg_monthly_revenue` + `open_mca_positions`;
+        # keep the daemon-native keys too so both the UI and internal scoring see
+        # the value (silent-blank-tile fix, 2026-07-02).
         "monthly_revenue": parsed.get("true_revenue_monthly"),
+        "avg_monthly_revenue": parsed.get("true_revenue_monthly"),
         "true_revenue_monthly": parsed.get("true_revenue_monthly"),
         "mca_positions": parsed.get("position_count"),
+        "open_mca_positions": parsed.get("position_count"),
         "leverage_ratio": parsed.get("leverage_pct"),
         "previously_submitted": parsed.get("previously_submitted"),
         "iso_broker": parsed.get("iso_broker"),
@@ -282,7 +390,7 @@ def build_lead_data(parsed: dict[str, Any], result: dict[str, Any], ref: dict[st
     }
     if ssn_hash:  # only when a full SSN was present to hash
         data["ssn_hash"] = ssn_hash
-    tz = derive_timezone(business_state) if business_state else None
+    tz = derive_timezone(business_state_code or business_state) if (business_state_code or business_state) else None
     if tz:
         data["timezone"] = tz
     return {k: v for k, v in data.items() if v not in (None, "")}

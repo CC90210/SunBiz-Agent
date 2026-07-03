@@ -270,4 +270,42 @@ if (IS_LINUX) {
     });
 }
 
+// ============================================================================
+// uw-lead-enricher - approved UW lead sheet refresh + contact enrichment
+// ============================================================================
+//
+// Keeps Ezra-approved Live Subs leads complete after they enter the Command
+// Centre. It re-reads the source UW Sheet to fill missing owner/business fields,
+// then uses Firecrawl/TruePeopleSearch through the shared research tools only
+// when the sheet itself has no email/phone. When it finds a usable channel, it
+// notifies Ezra for verification and revives only sequence steps that failed
+// because that channel was missing. It never sends merchant outreach directly.
+//
+// IS_LINUX-gated single instance. It pairs with mca-lead-scrubber and
+// ezra-telegram-bridge; running more than one copy could duplicate verification
+// notices and sequence revive attempts.
+if (IS_LINUX) {
+    apps.push({
+        name: "uw-lead-enricher",
+        script: "scripts/uw_lead_enricher.py",
+        args: ["loop", "--interval", "300"],
+        interpreter: PYTHON,
+        cwd: PROJECT_ROOT,
+        watch: false,
+        autorestart: true,
+        max_restarts: 20,
+        restart_delay: 30000,
+        env: {
+            PYTHONIOENCODING: "utf-8",
+            PYTHONUNBUFFERED: "1",
+            BRAVO_AGENT_ROOT: BRAVO_ROOT,
+        },
+        log_date_format: "YYYY-MM-DD HH:mm:ss",
+        error_file: "tmp/pm2-uw-lead-enricher-error.log",
+        out_file: "tmp/pm2-uw-lead-enricher-out.log",
+        merge_logs: true,
+        max_size: "10M",
+    });
+}
+
 module.exports = { apps };

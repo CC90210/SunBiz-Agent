@@ -1,0 +1,727 @@
+"""uw_lead_enricher.py - keep approved Breeze UW leads complete.
+
+The scrubber stages per-deal UW Sheets for Ezra. After Ezra approves a deal,
+the lead exists in tenant_records and the sequence runner can fire. This worker
+handles the gap discovered on 2026-07-02:
+
+1. Re-read the original Google Sheet for approved uw_sheet leads and fill any
+   missing owner/business fields with the current parser output.
+2. If the sheet still lacks email/phone, try external contact enrichment via
+   Firecrawl search and TruePeopleSearch through the shared research_fetch
+   ladder.
+3. Notify Ezra when a usable contact channel is newly found, and revive only
+   sequence_state rows that failed because that channel was missing.
+
+It never overwrites an existing value and never sends merchant outreach itself.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Optional
+from urllib.parse import quote_plus
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+
+from _bravo_bootstrap import bootstrap_bravo_path  # noqa: E402
+
+BRAVO_ROOT = bootstrap_bravo_path()
+
+from sunbiz_constants import SUNBIZ_TENANT_ID  # noqa: E402
+from import_mca_leads import normalize_email, normalize_phone  # noqa: E402
+from mca_lead_scrubber import SHEET_OWNER, SHEET_TITLE_HINT, build_lead_data  # noqa: E402
+from scrubber import ingest, scoring, uw_scoring  # noqa: E402
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+CLAIM_PATH = REPO_ROOT / "state" / "uw_lead_enricher.claim"
+EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
+PHONE_RE = re.compile(r"(?:\+?1[\s.\-]?)?(?:\([2-9]\d{2}\)|[2-9]\d{2})[\s.\-]?\d{3}[\s.\-]?\d{4}\b")
+BAD_EMAIL_PREFIXES = {"abuse", "admin", "billing", "help", "hello", "info", "legal", "no-reply", "noreply", "privacy", "support"}
+REQUIRED_SHEET_FIELDS = (
+    "dba",
+    "entity_type",
+    "ein",
+    "owner_name",
+    "owner_ssn_last4",
+    "business_address",
+    "business_city",
+    "business_zip",
+    "owner_address_line1",
+    "owner_address_city",
+    "owner_address_state",
+    "owner_address_zip",
+    "business_start_date",
+    "time_in_business",
+    "mca_positions",
+    "leverage_ratio",
+)
+
+
+def _log(msg: str) -> None:
+    ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    print(f"[uw-enricher {ts}] {msg}")
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _load_env() -> dict[str, str]:
+    try:
+        from lib.secret_loader import load_env  # type: ignore
+        return load_env()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[uw-enricher] secret_loader failed, using os.environ: {exc}", file=sys.stderr)
+        return dict(os.environ)
+
+
+def _client(env: dict[str, str]):
+    url = (env.get("BRAVO_SUPABASE_URL") or env.get("SUPABASE_URL") or "").strip()
+    key = (env.get("BRAVO_SUPABASE_SERVICE_ROLE_KEY") or env.get("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
+    if not url or not key:
+        print("[uw-enricher] BRAVO_SUPABASE_URL / SERVICE_ROLE_KEY missing", file=sys.stderr)
+        return None
+    try:
+        from supabase import create_client  # type: ignore
+        return create_client(url, key)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[uw-enricher] supabase client error: {exc}", file=sys.stderr)
+        return None
+
+
+def _missing(v: Any) -> bool:
+    return v is None or v == "" or v == [] or v == {}
+
+
+def _has_email(data: dict[str, Any]) -> bool:
+    return bool(normalize_email(data.get("email") or data.get("contact_email")))
+
+
+def _has_phone(data: dict[str, Any]) -> bool:
+    return bool(normalize_phone(data.get("phone") or data.get("contact_phone")))
+
+
+def _needs_sheet_refresh(data: dict[str, Any]) -> bool:
+    if not data.get("source_file_id"):
+        return False
+    return any(_missing(data.get(k)) for k in REQUIRED_SHEET_FIELDS)
+
+
+def _is_uw_lead(data: dict[str, Any]) -> bool:
+    return (
+        data.get("source") == "breeze_uw_sheet"
+        or data.get("stage") == "uw_sheet"
+        or bool(data.get("source_file_id"))
+    )
+
+
+def _merge_fill_only(target: dict[str, Any], incoming: dict[str, Any]) -> list[str]:
+    changed: list[str] = []
+    for key, value in incoming.items():
+        if _missing(value):
+            continue
+        if _missing(target.get(key)):
+            target[key] = value
+            changed.append(key)
+    return changed
+
+
+def _file_ref(env: dict[str, str], file_id: str, fallback_name: str = "") -> dict[str, Any]:
+    svc = ingest.drive_service(env)
+    meta = (
+        svc.files()
+        .get(
+            fileId=file_id,
+            fields="id,name,mimeType,modifiedTime",
+            supportsAllDrives=True,
+        )
+        .execute()
+    )
+    return {
+        "id": meta.get("id") or file_id,
+        "name": meta.get("name") or fallback_name or file_id,
+        "mime_type": meta.get("mimeType") or ingest.SHEET_MIME,
+        "modified_time": meta.get("modifiedTime"),
+    }
+
+
+def _refresh_from_source_sheet(env: dict[str, str], data: dict[str, Any]) -> tuple[dict[str, Any], list[str], Optional[str]]:
+    source_file_id = (data.get("source_file_id") or "").strip()
+    if not source_file_id:
+        return {}, [], "missing source_file_id"
+    try:
+        from scrubber import uw_sheet_parser as parser
+
+        ref = _file_ref(env, source_file_id, data.get("source_file") or "")
+        wb = ingest.fetch_workbook(env, ref)
+        parsed = parser.parse_uw_sheet(wb)
+        cfg = scoring.load_config()
+        result = uw_scoring.score_uw_deal(parsed, cfg)
+        fresh = build_lead_data(parsed, result, ref, cfg)
+        return fresh, [], None
+    except Exception as exc:  # noqa: BLE001
+        return {}, [], str(exc)[:300]
+
+
+def _flatten_text(value: Any, limit: int = 30000) -> str:
+    parts: list[str] = []
+
+    def walk(v: Any) -> None:
+        if sum(len(p) for p in parts) >= limit:
+            return
+        if isinstance(v, str):
+            parts.append(v)
+        elif isinstance(v, dict):
+            for vv in v.values():
+                walk(vv)
+        elif isinstance(v, list):
+            for vv in v:
+                walk(vv)
+
+    walk(value)
+    return "\n".join(parts)[:limit]
+
+
+def _confidence(text: str, data: dict[str, Any], source_kind: str) -> str:
+    t = text.lower()
+    business = str(data.get("business_name") or data.get("company") or "").lower()
+    owner = str(data.get("owner_name") or data.get("contact_name") or data.get("name") or "").lower()
+    city = str(data.get("business_city") or data.get("owner_address_city") or data.get("city") or "").lower()
+    business_hit = bool(business and business in t)
+    owner_hit = bool(owner and owner in t)
+    city_hit = bool(city and city in t)
+    if source_kind == "firecrawl" and business_hit:
+        return "HIGH"
+    if source_kind == "truepeoplesearch" and owner_hit and city_hit:
+        return "MEDIUM"
+    if business_hit or owner_hit:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _valid_email(email: str) -> Optional[str]:
+    normalized = normalize_email(email)
+    if not normalized:
+        return None
+    local, _, domain = normalized.partition("@")
+    if local.lower() in BAD_EMAIL_PREFIXES:
+        return None
+    if domain.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg")):
+        return None
+    return normalized
+
+
+def _extract_contacts(text: str, source_url: str, source_kind: str, data: dict[str, Any]) -> dict[str, Any]:
+    conf = _confidence(text, data, source_kind)
+    emails: list[str] = []
+    phones: list[str] = []
+    for m in EMAIL_RE.finditer(text):
+        e = _valid_email(m.group(0))
+        if e and e not in emails:
+            emails.append(e)
+    for m in PHONE_RE.finditer(text):
+        p = normalize_phone(m.group(0))
+        if p and p not in phones:
+            phones.append(p)
+    out: dict[str, Any] = {}
+    if emails:
+        out["email"] = emails[0]
+        out["email_source"] = source_url
+        out["email_confidence"] = conf
+    if phones:
+        out["phone"] = phones[0]
+        out["phone_source"] = source_url
+        out["phone_confidence"] = conf
+    return out
+
+
+def _run_json(argv: list[str], timeout: int) -> dict[str, Any]:
+    try:
+        res = subprocess.run(
+            argv,
+            cwd=str(BRAVO_ROOT or REPO_ROOT),
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+    if res.returncode != 0:
+        return {"ok": False, "error": (res.stderr or res.stdout)[-800:]}
+    try:
+        data = json.loads(res.stdout)
+        if isinstance(data, dict):
+            data.setdefault("ok", True)
+            return data
+        return {"ok": True, "data": data}
+    except json.JSONDecodeError:
+        return {"ok": False, "error": "non-json output", "stdout": res.stdout[-800:]}
+
+
+def _firecrawl_search(data: dict[str, Any]) -> list[dict[str, Any]]:
+    if not BRAVO_ROOT:
+        return []
+    city_state = " ".join(
+        p for p in (
+            data.get("business_city") or data.get("owner_address_city") or data.get("city"),
+            data.get("business_state") or data.get("owner_address_state") or data.get("state"),
+        )
+        if p
+    )
+    query = " ".join(
+        p for p in (
+            data.get("business_name") or data.get("company"),
+            data.get("dba"),
+            data.get("owner_name") or data.get("contact_name"),
+            city_state,
+            "email phone",
+        )
+        if p
+    )
+    if not query:
+        return []
+    script = Path(BRAVO_ROOT) / "scripts" / "integrations" / "firecrawl_tool.py"
+    raw = _run_json([sys.executable, str(script), "search", query, "--json"], timeout=45)
+    items = raw.get("data") or raw.get("results") or raw.get("web") or []
+    if isinstance(items, dict):
+        items = items.get("data") or items.get("results") or []
+    out: list[dict[str, Any]] = []
+    for item in (items or [])[:8]:
+        if not isinstance(item, dict):
+            continue
+        url = item.get("url") or item.get("sourceURL") or item.get("link") or "firecrawl-search"
+        text = "\n".join(
+            str(item.get(k) or "") for k in ("title", "description", "markdown", "content", "text")
+        )
+        found = _extract_contacts(text, url, "firecrawl", data)
+        if found:
+            out.append(found)
+    return out
+
+
+def _truepeople_search(data: dict[str, Any]) -> Optional[dict[str, Any]]:
+    if not BRAVO_ROOT:
+        return None
+    owner = data.get("owner_name") or data.get("contact_name") or data.get("name")
+    city = data.get("owner_address_city") or data.get("business_city") or data.get("city")
+    state = data.get("owner_address_state") or data.get("business_state_code") or data.get("state_code") or data.get("state")
+    if not owner or not (city or state):
+        return None
+    city_state = " ".join(p for p in (city, state) if p)
+    url = f"https://www.truepeoplesearch.com/results?name={quote_plus(str(owner))}&citystatezip={quote_plus(city_state)}"
+    script = Path(BRAVO_ROOT) / "scripts" / "research_fetch.py"
+    raw = _run_json([sys.executable, str(script), url, "--json", "--min-chars", "200"], timeout=75)
+    if not raw.get("ok"):
+        return None
+    text = raw.get("text") or ""
+    return _extract_contacts(text, raw.get("final_url") or url, "truepeoplesearch", data)
+
+
+def _best_contact(candidates: list[dict[str, Any]], key: str) -> Optional[dict[str, Any]]:
+    order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
+    usable = [
+        c for c in candidates
+        if c.get(key) and str(c.get(f"{key}_confidence") or "LOW").upper() in ("HIGH", "MEDIUM")
+    ]
+    if not usable:
+        return None
+    conf_key = f"{key}_confidence"
+    return sorted(usable, key=lambda c: order.get(str(c.get(conf_key) or "LOW"), 9))[0]
+
+
+def _mask_email(v: Any) -> str:
+    email = normalize_email(v)
+    if not email:
+        return "(none)"
+    local, _, domain = email.partition("@")
+    return f"{local[:1]}***@{domain}"
+
+
+def _mask_phone(v: Any) -> str:
+    phone = normalize_phone(v)
+    if not phone:
+        return "(none)"
+    return f"{phone[:-4]}****"
+
+
+def _contact_preview(data: dict[str, Any], changed_keys: list[str]) -> str:
+    parts: list[str] = []
+    if "email" in changed_keys:
+        parts.append(
+            "email="
+            + _mask_email(data.get("email"))
+            + f" conf={data.get('email_confidence', 'LOW')} src={data.get('email_source', 'unknown')}"
+        )
+    if "phone" in changed_keys:
+        parts.append(
+            "phone="
+            + _mask_phone(data.get("phone"))
+            + f" conf={data.get('phone_confidence', 'LOW')} src={data.get('phone_source', 'unknown')}"
+        )
+    return " | ".join(parts)
+
+
+def _enrich_contact(data: dict[str, Any], skip_web: bool = False) -> tuple[dict[str, Any], list[str]]:
+    if skip_web or (_has_email(data) and _has_phone(data)):
+        return {}, []
+    candidates: list[dict[str, Any]] = []
+    candidates.extend(_firecrawl_search(data))
+    if not any(c.get("phone") for c in candidates):
+        tp = _truepeople_search(data)
+        if tp:
+            candidates.append(tp)
+
+    incoming: dict[str, Any] = {}
+    changed: list[str] = []
+    if not _has_email(data):
+        c = _best_contact(candidates, "email")
+        if c:
+            incoming.update({k: c[k] for k in ("email", "email_source", "email_confidence") if c.get(k)})
+    if not _has_phone(data):
+        c = _best_contact(candidates, "phone")
+        if c:
+            incoming.update({k: c[k] for k in ("phone", "phone_source", "phone_confidence") if c.get(k)})
+
+    if incoming:
+        incoming["enriched_at"] = _now_iso()
+        if incoming.get("email") or _has_email(data):
+            incoming["enrich_status"] = "done"
+        elif incoming.get("phone") or _has_phone(data):
+            incoming["enrich_status"] = "call_only"
+        else:
+            incoming["enrich_status"] = "none"
+        for k in ("email", "phone"):
+            if incoming.get(k):
+                changed.append(k)
+    else:
+        incoming["enriched_at"] = _now_iso()
+        incoming["enrich_status"] = "none"
+        if candidates:
+            incoming["enrich_notes"] = "low_confidence_candidates_suppressed"
+    return incoming, changed
+
+
+def _publish_status_event(sb, lead_id: str, data: dict[str, Any]) -> None:
+    sb.table("agent_events").insert({
+        "event_type": "BRAVO_RECORD_STATUS_CHANGED",
+        "publisher_agent": "uw-lead-enricher",
+        "source_agent": "uw-lead-enricher",
+        "severity": "info",
+        "payload": {
+            "entity": "lead",
+            "record_id": lead_id,
+            "field": "stage",
+            "from": data.get("stage") or "uw_sheet",
+            "to": data.get("stage") or "uw_sheet",
+            "data": data,
+            "tenant_id": SUNBIZ_TENANT_ID,
+            "triggering_event": "uw_lead_enriched",
+        },
+        "correlation_id": SUNBIZ_TENANT_ID,
+    }).execute()
+
+
+def _revive_missing_contact_steps(sb, lead_id: str, data: dict[str, Any]) -> int:
+    if not (_has_email(data) or _has_phone(data)):
+        return 0
+    try:
+        rows = (
+            sb.table("sequence_state")
+            .select("id,last_error")
+            .eq("tenant_id", SUNBIZ_TENANT_ID)
+            .eq("lead_id", lead_id)
+            .eq("status", "failed")
+            .limit(50)
+            .execute()
+        ).data or []
+    except Exception as exc:  # noqa: BLE001
+        _log(f"sequence revive read failed lead={lead_id}: {exc}")
+        return 0
+    revived = 0
+    for row in rows:
+        err = str(row.get("last_error") or "").lower()
+        can_fix = ("no email" in err and _has_email(data)) or ("no phone" in err and _has_phone(data))
+        if not can_fix:
+            continue
+        try:
+            sb.table("sequence_state").update({
+                "status": "scheduled",
+                "attempt_count": 0,
+                "last_error": None,
+                "claimed_at": None,
+                "claimed_by": None,
+                "scheduled_for": _now_iso(),
+            }).eq("id", row["id"]).execute()
+            revived += 1
+        except Exception as exc:  # noqa: BLE001
+            _log(f"sequence revive update failed row={row.get('id')}: {exc}")
+    return revived
+
+
+def _notify_ezra(env: dict[str, str], data: dict[str, Any], changed: list[str]) -> bool:
+    if str(env.get("UW_ENRICH_NOTIFY_EZRA") or "1").strip().lower() in ("0", "false", "no"):
+        return False
+    try:
+        from scrubber import telegram_bridge as tg
+    except Exception as exc:  # noqa: BLE001
+        _log(f"telegram import failed: {exc}")
+        return False
+    chat = (env.get("EZRA_TELEGRAM_CHAT_ID") or "").strip()
+    if not chat:
+        return False
+    biz = data.get("business_name") or data.get("company") or "(unnamed)"
+    bits = []
+    if "email" in changed and data.get("email"):
+        bits.append(f"email: {data['email']} ({data.get('email_confidence', 'LOW')})")
+    if "phone" in changed and data.get("phone"):
+        bits.append(f"phone: {data['phone']} ({data.get('phone_confidence', 'LOW')})")
+    if not bits:
+        return False
+    text = "UW lead enriched - verify before relying on it.\n\n" + str(biz) + "\n" + "\n".join(bits)
+    res = tg.api(env, "sendMessage", {"chat_id": chat, "text": text})
+    return bool(res.get("ok"))
+
+
+def _fetch_candidate_leads(sb, limit: int) -> list[dict[str, Any]]:
+    try:
+        rows = (
+            sb.table("tenant_records")
+            .select("id, tenant_id, entity_type, data, created_at")
+            .eq("tenant_id", SUNBIZ_TENANT_ID)
+            .eq("entity_type", "lead")
+            .order("created_at", desc=True)
+            .limit(max(limit * 20, 500))
+            .execute()
+        ).data or []
+    except Exception as exc:  # noqa: BLE001
+        _log(f"lead read failed: {exc}")
+        return []
+    out = [r for r in rows if _is_uw_lead(r.get("data") or {})]
+    return out[:limit]
+
+
+def _max_notify(env: dict[str, str]) -> int:
+    """Per-pass cap on Ezra verification messages so the first backfill pass over
+    a backlog of contact-less leads can't flood the Dolphin chat. 0 = unlimited."""
+    try:
+        return max(0, int(str(env.get("UW_ENRICH_MAX_NOTIFY") or "5").strip()))
+    except ValueError:
+        return 5
+
+
+def process_once(sb, env: dict[str, str], *, dry_run: bool, limit: int, force_refresh: bool, skip_web: bool) -> dict[str, int]:
+    stats = {"seen": 0, "updated": 0, "sheet_refreshed": 0, "contact_found": 0, "events": 0, "revived": 0, "notified": 0, "notify_suppressed": 0, "errors": 0}
+    max_notify = _max_notify(env)
+    for row in _fetch_candidate_leads(sb, limit):
+        stats["seen"] += 1
+        lead_id = row["id"]
+        original = row.get("data") or {}
+        data = dict(original)
+        changed_keys: list[str] = []
+
+        if force_refresh or _needs_sheet_refresh(data):
+            fresh, _, err = _refresh_from_source_sheet(env, data)
+            if err:
+                stats["errors"] += 1
+                _log(f"sheet refresh failed lead={lead_id}: {err}")
+            else:
+                sheet_changes = _merge_fill_only(data, fresh)
+                if sheet_changes:
+                    changed_keys.extend(sheet_changes)
+                    stats["sheet_refreshed"] += 1
+
+        contact_incoming, contact_changed = _enrich_contact(data, skip_web=skip_web)
+        contact_fill = _merge_fill_only(data, contact_incoming)
+        if contact_changed:
+            changed_keys.extend(contact_changed)
+            stats["contact_found"] += 1
+        elif contact_fill:
+            changed_keys.extend(contact_fill)
+
+        if not changed_keys:
+            continue
+        data["uw_enriched_at"] = _now_iso()
+        data["uw_enrichment_version"] = "2026-07-02"
+
+        preview = ", ".join(sorted(set(changed_keys))[:8])
+        contact_preview = _contact_preview(data, changed_keys)
+        if dry_run:
+            suffix = f" contact={contact_preview}" if contact_preview else ""
+            _log(f"DRY update lead={lead_id} fields={preview}{suffix}")
+            continue
+
+        try:
+            sb.table("tenant_records").update({"data": data}).eq("id", lead_id).eq("tenant_id", SUNBIZ_TENANT_ID).execute()
+            stats["updated"] += 1
+            newly_contacted = any(k in ("email", "phone") for k in changed_keys)
+            if newly_contacted:
+                _publish_status_event(sb, lead_id, data)
+                stats["events"] += 1
+                stats["revived"] += _revive_missing_contact_steps(sb, lead_id, data)
+                # Data is written + drips revived regardless; only the Ezra ping is
+                # capped per pass to avoid a Telegram flood on the first backfill.
+                if max_notify == 0 or stats["notified"] < max_notify:
+                    if _notify_ezra(env, data, [k for k in changed_keys if k in ("email", "phone")]):
+                        stats["notified"] += 1
+                        _log(f"notified Ezra lead={lead_id}")
+                else:
+                    stats["notify_suppressed"] += 1
+            _log(f"updated lead={lead_id} fields={preview}")
+        except Exception as exc:  # noqa: BLE001
+            stats["errors"] += 1
+            _log(f"update failed lead={lead_id}: {exc}")
+    if stats["notify_suppressed"]:
+        _log(
+            f"suppressed {stats['notify_suppressed']} Ezra notice(s) this pass "
+            f"(cap={max_notify}) — data still written + drips still revived"
+        )
+    return stats
+
+
+def _pid_alive(pid: Any) -> bool:
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except Exception:
+        return False
+
+
+def acquire_claim(stale_seconds: int = 900) -> bool:
+    CLAIM_PATH.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if CLAIM_PATH.exists():
+            rec = json.loads(CLAIM_PATH.read_text(encoding="utf-8"))
+            ts = rec.get("ts")
+            age = None
+            if ts:
+                try:
+                    age = (datetime.now(timezone.utc) - datetime.fromisoformat(ts)).total_seconds()
+                except Exception:
+                    age = None
+            other_pid = rec.get("pid")
+            fresh = age is None or age < stale_seconds
+            if other_pid != os.getpid() and _pid_alive(other_pid) and fresh:
+                return False
+    except Exception:
+        pass
+    refresh_claim()
+    return True
+
+
+def refresh_claim() -> None:
+    try:
+        CLAIM_PATH.write_text(json.dumps({"pid": os.getpid(), "ts": _now_iso()}), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def doctor(env: dict[str, str]) -> int:
+    _log("-- UW lead enricher doctor --")
+    sb = _client(env)
+    print(f"  supabase client:       {'ok' if sb else 'MISSING'}")
+    print(f"  SunBiz tenant_id:      {SUNBIZ_TENANT_ID}")
+    print(f"  CEO-Agent root:        {BRAVO_ROOT or 'NOT FOUND'}")
+    print(f"  Drive source owner:    {SHEET_OWNER}")
+    print(f"  sheet title hint:      {SHEET_TITLE_HINT}")
+    missing = ingest._missing_creds(env)
+    print(f"  Breeze Drive creds:    {'all set' if not missing else 'MISSING: ' + ', '.join(missing)}")
+    if not missing:
+        try:
+            found = ingest.discover_sheets(env, owner=SHEET_OWNER, title_hint=SHEET_TITLE_HINT, max_results=25)
+            print(f"  Drive discovery:       OK ({len(found)} candidate sheets in latest scan)")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  Drive discovery:       FAIL - {exc}")
+    bravo = Path(BRAVO_ROOT) if BRAVO_ROOT else None
+    print(f"  Firecrawl tool:        {'present' if bravo and (bravo / 'scripts/integrations/firecrawl_tool.py').exists() else 'missing'}")
+    print(f"  research_fetch tool:   {'present' if bravo and (bravo / 'scripts/research_fetch.py').exists() else 'missing'}")
+    print(f"  Ezra Telegram config:  token={'set' if env.get('EZRA_TELEGRAM_BOT_TOKEN') else 'unset'} chat={'set' if env.get('EZRA_TELEGRAM_CHAT_ID') else 'unset'}")
+    if sb:
+        leads = _fetch_candidate_leads(sb, 500)
+        missing_contact = sum(1 for r in leads if not (_has_email(r.get("data") or {}) and _has_phone(r.get("data") or {})))
+        needs_sheet = sum(1 for r in leads if _needs_sheet_refresh(r.get("data") or {}))
+        print(f"  UW leads sampled:      {len(leads)}")
+        print(f"  missing contact:       {missing_contact}")
+        print(f"  needs sheet refresh:   {needs_sheet}")
+    return 0 if sb else 1
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description="Refresh/enrich approved Breeze UW leads")
+    parser.add_argument("mode", choices=["once", "loop", "doctor"], nargs="?", default="once")
+    parser.add_argument("--interval", type=int, default=300, help="seconds between loop passes")
+    parser.add_argument("--limit", type=int, default=100, help="max UW leads to inspect per pass")
+    parser.add_argument("--dry-run", action="store_true", help="print changes without writing")
+    parser.add_argument("--force-refresh", action="store_true", help="re-read source sheets even if required fields are present")
+    parser.add_argument("--skip-web", action="store_true", help="skip Firecrawl/TruePeopleSearch contact lookups")
+    parser.add_argument("--no-notify", action="store_true", help="suppress Ezra Telegram verification notices")
+    args = parser.parse_args(argv)
+
+    env = _load_env()
+    if args.no_notify:
+        env["UW_ENRICH_NOTIFY_EZRA"] = "0"
+
+    if args.mode == "doctor":
+        return doctor(env)
+
+    sb = _client(env)
+    if sb is None:
+        return 1
+
+    if args.mode == "once":
+        stats = process_once(
+            sb,
+            env,
+            dry_run=args.dry_run,
+            limit=args.limit,
+            force_refresh=args.force_refresh,
+            skip_web=args.skip_web,
+        )
+        _log(f"once stats={stats}")
+        return 0 if stats["errors"] == 0 else 1
+
+    if not acquire_claim():
+        print("[uw-enricher] another instance holds the claim - exiting", file=sys.stderr)
+        return 1
+    _log(f"loop: refreshing UW leads every {max(60, args.interval)}s")
+    while True:
+        try:
+            refresh_claim()
+            stats = process_once(
+                sb,
+                env,
+                dry_run=args.dry_run,
+                limit=args.limit,
+                force_refresh=args.force_refresh,
+                skip_web=args.skip_web,
+            )
+            _log(f"loop stats={stats}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[uw-enricher] tick error: {exc}", file=sys.stderr)
+        time.sleep(max(60, args.interval))
+
+
+if __name__ == "__main__":
+    sys.exit(main())

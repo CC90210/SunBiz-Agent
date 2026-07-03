@@ -133,25 +133,38 @@ def _parse_personal_block(ws) -> dict[str, Any]:
     DBA, entity type, DL, 2nd owner, bank. Address sub-fields (City/State/Zip
     repeat for business AND home) are read by VERIFIED offset beneath their
     anchor label so the duplicated labels can't collide."""
+    def label_key(v: Any) -> str:
+        return re.sub(r"\s+", " ", str(v or "").strip().rstrip(":").lower())
+
     labelB: dict[str, int] = {}
+    labelB_norm: dict[str, int] = {}
     scan_to = min(ws.max_row or 95, 95)
     for r in range(1, scan_to + 1):
         b = ws.cell(r, 2).value
         if isinstance(b, str) and b.strip():
-            labelB.setdefault(b.strip(), r)
+            raw = b.strip()
+            labelB.setdefault(raw, r)
+            labelB_norm.setdefault(label_key(raw), r)
 
     def C(row: Optional[int]) -> Optional[str]:
         return _str(ws.cell(row, 3).value) if row else None
 
     def by_label(lbl: str) -> Optional[str]:
-        return C(labelB.get(lbl))
+        return C(labelB.get(lbl) or labelB_norm.get(label_key(lbl)))
+
+    def by_label_any(*labels: str) -> Optional[str]:
+        for lbl in labels:
+            v = by_label(lbl)
+            if v not in (None, ""):
+                return v
+        return None
 
     def offset(anchor: str, delta: int, expect: str) -> Optional[str]:
-        r = labelB.get(anchor)
+        r = labelB.get(anchor) or labelB_norm.get(label_key(anchor))
         if not r:
             return None
         rr = r + delta
-        return C(rr) if _str(ws.cell(rr, 2).value) == expect else None
+        return C(rr) if label_key(ws.cell(rr, 2).value) == label_key(expect) else None
 
     return {
         "dba": by_label("DBA"),
@@ -168,6 +181,28 @@ def _parse_personal_block(ws) -> dict[str, Any]:
         "phone": by_label("Phone"),
         "owner_first": by_label("Owner First Name"),
         "owner_last": by_label("Owner Last Name"),
+        "dob": by_label_any(
+            "Date of Birth",
+            "DOB",
+            "Birth Date",
+            "Owner DOB",
+            "Owner Date of Birth",
+            "Signer DOB",
+        ),
+        "citizenship": by_label_any(
+            "Citizenship",
+            "Owner Citizenship",
+            "US Citizen?",
+            "U.S. Citizen?",
+            "Citizen",
+        ),
+        "credit_score": by_label_any(
+            "Credit Score",
+            "Owner Credit Score",
+            "FICO",
+            "FICO Score",
+            "Credit",
+        ),
         "ssn": by_label("SSN"),
         "drivers_license": by_label("Driver's License"),
         "second_owner_name": by_label("2nd Owner Full Name"),
@@ -269,6 +304,19 @@ def parse_uw_sheet(workbook) -> dict[str, Any]:
     industry = _str(_first_nonempty_right(ws, "Industry"))
     state = _str(_right_of(ws, idx, "State"))
     first_position = _str(_right_of(ws, idx, "1st Position"))
+    # Credit: best-effort ANALYSIS-column read (col A label → value col B). Verified
+    # 2026-07-02 against 36 live filled "UW Sheet 2.5" deals: the "Credit" row is
+    # normally BLANK and the credit signal is an Experian report *hyperlink*
+    # ("Experian:" → "Link"), not a number — so this usually yields None and the
+    # numeric score must come from enrichment, not the sheet. Kept as a best-effort
+    # so that any template revision which DOES type a score is still captured; the
+    # downstream _credit_score() sanitizer discards non-numeric values like "Link".
+    credit_score = _str(
+        _right_of(ws, idx, "Credit")
+        or _right_of(ws, idx, "Credit Score")
+        or _right_of(ws, idx, "FICO")
+        or _right_of(ws, idx, "Experian:")
+    )
 
     # revenue table: averages live on the "Average" row, under the
     # "True Revenue" and "Monthly Leverage" columns.
@@ -316,6 +364,14 @@ def parse_uw_sheet(workbook) -> dict[str, Any]:
         "owner_name": owner_name,
         "owner_first": owner_first,
         "owner_last": owner_last,
+        # DOB, citizenship, and a NUMERIC credit score are NOT present on the UW
+        # Sheet 2.5 template (no DOB/citizenship rows; the "Credit" row is blank and
+        # credit is an Experian report *link*). These three stay None from the sheet
+        # and can only be filled by enrichment/background pulls downstream. Kept in
+        # the return so the shape is stable and future template revisions light up.
+        "owner_dob": pers.get("dob"),
+        "owner_citizenship": pers.get("citizenship"),
+        "credit_score": credit_score or pers.get("credit_score"),
         "email": email,
         "phone": phone,
         "ein": ein,
