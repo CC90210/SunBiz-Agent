@@ -1,3 +1,10 @@
+> ⛔ **SUPERSEDED 2026-07-03 — DO NOT EXECUTE.** The enricher + skip-fix described
+> below were BUILT, tested, and merged to main (`6e2faf4`). The current VPS task is
+> **deploy + verify**, not build. Use the live runbook instead:
+> **docs/breeze-uw-vps-env-system-message.md**
+> (https://github.com/CC90210/SunBiz-Agent/blob/main/docs/breeze-uw-vps-env-system-message.md)
+> This file is kept for history only.
+
 SYSTEM — VPS AGENT: Breeze UW — Live Subs CONTACT ENRICHMENT + Drive skip-fix (RESUME)
 
 You are Bravo on the SunBiz VPS (/srv/sunbiz/sunbiz-agent). The connection dropped mid-task;
