@@ -257,8 +257,14 @@ def validate_steps(steps: list) -> list[str]:
             problems.append(f"$[{i}].channel invalid: {s.get('channel')!r}")
         if not isinstance(s.get("delay_minutes"), (int, float)):
             problems.append(f"$[{i}].delay_minutes invalid")
+        # Accept both step shapes, matching the runner (body_text || body)
+        # and the dashboard parser (lib/drips/types.ts, 2026-07-06).
         body = s.get("body")
-        if not isinstance(body, str) or not body.strip():
+        body_text = s.get("body_text")
+        has_content = (isinstance(body, str) and body.strip()) or (
+            isinstance(body_text, str) and body_text.strip()
+        )
+        if not has_content:
             problems.append(f"$[{i}].body empty/missing")
         if s.get("channel") == "email":
             subject = s.get("subject")
@@ -331,7 +337,11 @@ def main() -> int:
         if drift:
             print(f"  ~ UPDATE  {seq['name']}")
             if not args.dry_run:
-                client.table("drip_sequences").update(payload).eq("id", existing_row["id"]).execute()
+                # `enabled` is operator-owned after seeding: reconcile must
+                # never revert a pause/enable the operator set in the
+                # dashboard. It's applied on INSERT only (2026-07-06 review).
+                update_payload = {k: v for k, v in payload.items() if k != "enabled"}
+                client.table("drip_sequences").update(update_payload).eq("id", existing_row["id"]).execute()
             updated += 1
         else:
             unchanged += 1
