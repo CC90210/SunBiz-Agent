@@ -1,0 +1,8 @@
+{
+  "name": "sunbiz",
+  "entry_points": ["CLAUDE.md", "GEMINI.md", "ANTIGRAVITY.md", "AGENTS.md", "OPENCODE.md"],
+  "mirror_dir": "",
+  "model_access": ["scripts/lib/claude_cli.py", "scripts/lib/claude_auth.py"],
+  "learning_loop": ["scripts/agent_sleep.py"],
+  "eval": ["scripts/agent_genome.py"]
+}
