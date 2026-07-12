@@ -75,6 +75,82 @@ def _haiku_model() -> str:
 
 CLASSIFIER_MODEL = _haiku_model()
 
+# SunBiz tenant scope. The service-role client bypasses RLS, so without an
+# explicit filter this daemon would poll + mutate EVERY tenant's threads
+# (audit 2026-07-12 flagged it as a cross-tenant fail-open actor, which
+# sunbiz_health_check.py also watches). Scope every poll + write to SunBiz.
+try:
+    from sunbiz_constants import SUNBIZ_TENANT_ID  # type: ignore  # noqa: E402
+except Exception:  # pragma: no cover - constant must exist in prod
+    SUNBIZ_TENANT_ID = os.environ.get("SUNBIZ_TENANT_ID", "")
+
+# Statuses the live application_lender_threads CHECK constraint accepts
+# (migration 068). The daemon historically wrote a pre-068 vocabulary
+# (approved/info_requested/responded/no_response) — every such write is
+# rejected, which is the 302k-write storm the audit found. LABEL_TO_STATUS
+# below remaps classify outputs onto this legal set; 'no_response' and
+# 'suppressed' have no legal peer and are re-added by migration 082 (PENDING
+# — no SUPABASE token on this box). Until 082 lands, _update_thread_status
+# detects the constraint rejection, logs ONCE, and stops re-issuing that
+# status so a rejected write can never storm again.
+_LEGAL_THREAD_STATUSES = frozenset({
+    "pending", "sending", "sent", "replied", "offer_received", "declined", "error",
+})
+_constraint_rejected_statuses: set[str] = set()
+
+
+def _looks_like_check_violation(exc: Exception) -> bool:
+    """True when a DB write failed because the status CHECK constraint
+    rejected the value (Postgres SQLSTATE 23514 / check_violation)."""
+    s = str(exc).lower()
+    return (
+        "23514" in s
+        or "check constraint" in s
+        or "check_violation" in s
+        or "violates check" in s
+    )
+
+
+def _update_thread_status(sb, thread_id: str, tenant_id: str | None, fields: dict) -> bool:
+    """Tenant-scoped UPDATE of one application_lender_threads row. Returns
+    True on success. On a status-CHECK rejection it logs once per offending
+    status and suppresses further attempts this run (storm guard); other
+    errors log per row. Writes are scoped by tenant_id (defense-in-depth on
+    top of the PK match) so a stray id can't cross tenants."""
+    new_status = fields.get("status")
+    if new_status is not None and new_status in _constraint_rejected_statuses:
+        return False
+    try:
+        q = sb.table("application_lender_threads").update(fields).eq("id", thread_id)
+        if tenant_id:
+            q = q.eq("tenant_id", tenant_id)
+        q.execute()
+        return True
+    except Exception as e:  # noqa: BLE001
+        if new_status and _looks_like_check_violation(e):
+            if new_status not in _constraint_rejected_statuses:
+                _constraint_rejected_statuses.add(new_status)
+                _log(f"status '{new_status}' rejected by DB CHECK constraint — "
+                     f"suppressing further '{new_status}' writes this run "
+                     f"(needs migration 082). {e}")
+            return False
+        _log(f"thread status update failed id={thread_id}: {e}")
+        return False
+
+
+def _call_classifier_model(prompt: str, *, system: str | None = None) -> str | None:
+    """Run the classifier model via the LOCAL claude CLI on the subscription
+    OAuth (scripts/lib/claude_cli.run_claude_cli) — NEVER the metered
+    ANTHROPIC_API_KEY (dead key: the raw api.anthropic.com path was removed
+    2026-07-12). Lender-reply bodies are untrusted, so the wrapper denies all
+    tools. Returns the model's text, or None on any failure."""
+    try:
+        from lib.claude_cli import run_claude_cli  # type: ignore  # noqa: E402
+    except Exception as e:  # noqa: BLE001
+        _log(f"classifier model: claude_cli import failed: {e}")
+        return None
+    return run_claude_cli(prompt, system=system, model="haiku", timeout=45)
+
 # Look back this far when scanning Gmail threads on each poll. Older
 # threads are presumed already-classified or no_response (and would
 # have aged out via the SLA check anyway). Tunable.
@@ -141,13 +217,15 @@ def sla_sweep(sb) -> int:
     """Find sent-but-silent threads past their SLA, mark them
     no_response. No classifier calls; cheap + safe."""
     try:
-        rows = (
+        q = (
             sb.table("application_lender_threads")
             .select("id, lender_id, tenant_id, sent_at")
             .eq("status", "sent")
             .not_.is_("sent_at", "null")
-            .execute()
         )
+        if SUNBIZ_TENANT_ID:
+            q = q.eq("tenant_id", SUNBIZ_TENANT_ID)
+        rows = q.execute()
     except Exception as e:
         _log(f"sla_sweep: read failed: {e}")
         return 0
@@ -185,14 +263,11 @@ def sla_sweep(sb) -> int:
         sla = sla_by_lender.get(r["lender_id"], DEFAULT_SLA_DAYS)
         if (now - sent_at) < timedelta(days=sla):
             continue
-        try:
-            sb.table("application_lender_threads").update({
-                "status": "no_response",
-                "last_error": f"SLA {sla}d exceeded; no reply from lender",
-            }).eq("id", r["id"]).execute()
+        if _update_thread_status(sb, r["id"], r.get("tenant_id"), {
+            "status": "no_response",
+            "last_error": f"SLA {sla}d exceeded; no reply from lender",
+        }):
             flipped += 1
-        except Exception as e:
-            _log(f"sla_sweep: update failed row={r['id']}: {e}")
     return flipped
 
 
@@ -309,43 +384,12 @@ def extract_missing_info(body: str) -> dict:
     extract a structured list of missing artefacts. Returns
     {"missing": [...], "note": "..."} — empty list on any error so the
     caller can fall through without surfacing a false alarm."""
-    api_key = _load_env_var("ANTHROPIC_API_KEY")
-    if not api_key:
-        return {"missing": [], "note": ""}
-    try:
-        import requests
-    except ImportError:
-        return {"missing": [], "note": ""}
-
     vocab_str = "\n".join(f"  - {v}" for v in MISSING_INFO_VOCAB)
     prompt = MISSING_INFO_PROMPT.format(vocab=vocab_str, body=body[:4000])
-    try:
-        r = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": CLASSIFIER_MODEL,
-                "max_tokens": 300,
-                "messages": [{"role": "user", "content": prompt}],
-            },
-            timeout=30,
-        )
-    except requests.RequestException as e:
-        _log(f"missing_info: network error: {e}")
+    text = _call_classifier_model(prompt)
+    if not text:
+        _log("missing_info: classifier model returned no output")
         return {"missing": [], "note": ""}
-    if r.status_code >= 400:
-        _log(f"missing_info: Anthropic HTTP {r.status_code}")
-        return {"missing": [], "note": ""}
-    try:
-        data = r.json()
-    except ValueError:
-        return {"missing": [], "note": ""}
-
-    text = "".join(blk.get("text", "") for blk in data.get("content", []) if blk.get("type") == "text").strip()
     s, e = text.find("{"), text.rfind("}")
     if s == -1 or e <= s:
         return {"missing": [], "note": ""}
@@ -494,14 +538,6 @@ def classify_with_claude(body: str) -> dict:
     """Call Claude to classify the lender response. Returns
     {"label": str, "summary": str} or {"label": "unclear", ...} on
     any failure. Best-effort by design."""
-    api_key = _load_env_var("ANTHROPIC_API_KEY")
-    if not api_key:
-        return {"label": "unclear", "summary": "ANTHROPIC_API_KEY not configured"}
-    try:
-        import requests
-    except ImportError:
-        return {"label": "unclear", "summary": "requests package not installed"}
-
     # Neutralize any attempt to forge/close the data delimiter so injected text
     # can't appear to "break out" of the <email>...</email> block. Defense in
     # depth behind the system message; the strict JSON-enum parse below is the
@@ -512,36 +548,9 @@ def classify_with_claude(body: str) -> dict:
     # that crashed every real classification). replace() also means a brace in
     # the untrusted body can never be interpreted as a format field.
     prompt = CLASSIFIER_PROMPT.replace("{body}", safe_body)
-    try:
-        r = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": CLASSIFIER_MODEL,
-                "max_tokens": 200,
-                # System message frames the email as untrusted data, not commands.
-                "system": CLASSIFIER_SYSTEM,
-                "messages": [{"role": "user", "content": prompt}],
-            },
-            timeout=30,
-        )
-    except requests.RequestException as e:
-        return {"label": "unclear", "summary": f"network error: {e}"}
-    if r.status_code >= 400:
-        return {"label": "unclear", "summary": f"Anthropic HTTP {r.status_code}"}
-    try:
-        data = r.json()
-    except ValueError:
-        return {"label": "unclear", "summary": "non-JSON response from Anthropic"}
-    text = ""
-    for blk in data.get("content", []):
-        if blk.get("type") == "text":
-            text += blk.get("text", "")
-    text = text.strip()
+    text = _call_classifier_model(prompt, system=CLASSIFIER_SYSTEM)
+    if not text:
+        return {"label": "unclear", "summary": "classifier model returned no output"}
     # Try to parse strict JSON; if Claude added prose around it, find
     # the {...} block.
     try:
@@ -655,44 +664,11 @@ def extract_offer_terms(body: str) -> dict:
     terms from the lender email via Claude. Returns a dict containing only the
     keys the model could fill (values coerced to numbers). Returns {} on any
     error — best-effort, never raises into the caller."""
-    api_key = _load_env_var("ANTHROPIC_API_KEY")
-    if not api_key:
-        return {}
-    try:
-        import requests
-    except ImportError:
-        return {}
-
     prompt = OFFER_EXTRACT_PROMPT.format(vocab=OFFER_VOCAB_NOTE, body=body[:4000])
-    try:
-        r = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": CLASSIFIER_MODEL,
-                "max_tokens": 300,
-                "messages": [{"role": "user", "content": prompt}],
-            },
-            timeout=30,
-        )
-    except requests.RequestException as e:
-        _log(f"offer_terms: network error: {e}")
+    text = _call_classifier_model(prompt)
+    if not text:
+        _log("offer_terms: classifier model returned no output")
         return {}
-    if r.status_code >= 400:
-        _log(f"offer_terms: Anthropic HTTP {r.status_code}")
-        return {}
-    try:
-        data = r.json()
-    except ValueError:
-        return {}
-
-    text = "".join(
-        blk.get("text", "") for blk in data.get("content", []) if blk.get("type") == "text"
-    ).strip()
     s, e = text.find("{"), text.rfind("}")
     if s == -1 or e <= s:
         return {}
@@ -913,13 +889,20 @@ def _persist_lender_feedback(sb, thread: dict, label: str) -> None:
 # ─────────────────────────────────────────────────────────────────────
 
 # Map classifier label -> application_lender_threads.status enum value.
+# Classify labels -> application_lender_threads.status. Remapped 2026-07-12
+# onto the 068-legal vocabulary (the daemon previously wrote the pre-068
+# words approved/info_requested/responded, all rejected by the CHECK):
+#   approved       -> offer_received  (what daily_plan_generator's new_offer
+#                                       card reads — this remap is functional,
+#                                       not cosmetic)
+#   declined       -> declined        (already legal)
+#   info_requested -> replied         (nearest legal "reply, no decision yet")
+#   unclear        -> replied         (something came in; operator decides)
 LABEL_TO_STATUS = {
-    "approved": "approved",
+    "approved": "offer_received",
     "declined": "declined",
-    "info_requested": "info_requested",
-    # unclear -> stay at 'responded' so the operator sees something
-    # came in but decides themselves.
-    "unclear": "responded",
+    "info_requested": "replied",
+    "unclear": "replied",
 }
 
 
@@ -927,13 +910,15 @@ def classify_tick(sb) -> int:
     """Find threads that have a Gmail thread_id, are still at status=sent,
     fetch the latest reply, classify, update status."""
     try:
-        rows = (
+        q = (
             sb.table("application_lender_threads")
             .select("id, tenant_id, application_id, gmail_thread_id, status, sent_at")
             .eq("status", "sent")
             .not_.is_("gmail_thread_id", "null")
-            .execute()
         )
+        if SUNBIZ_TENANT_ID:
+            q = q.eq("tenant_id", SUNBIZ_TENANT_ID)
+        rows = q.execute()
     except Exception as e:
         _log(f"classify_tick: read failed: {e}")
         return 0
@@ -946,17 +931,14 @@ def classify_tick(sb) -> int:
         if not body:
             continue
         result = classify_with_claude(body)
-        new_status = LABEL_TO_STATUS.get(result["label"], "responded")
-        try:
-            sb.table("application_lender_threads").update({
-                "status": new_status,
-                "last_response_at": datetime.now(timezone.utc).isoformat(),
-                "last_response_summary": result["summary"],
-            }).eq("id", r["id"]).execute()
+        new_status = LABEL_TO_STATUS.get(result["label"], "replied")
+        if _update_thread_status(sb, r["id"], r.get("tenant_id"), {
+            "status": new_status,
+            "last_response_at": datetime.now(timezone.utc).isoformat(),
+            "last_response_summary": result["summary"],
+        }):
             classified += 1
             _log(f"classified thread={r['id']} -> {new_status}: {result['summary']}")
-        except Exception as e:
-            _log(f"classify_tick: update failed row={r['id']}: {e}")
 
         # When the lender approved, second-pass extract the offer terms
         # (advance, factor rate, term) from the email and write them onto the
