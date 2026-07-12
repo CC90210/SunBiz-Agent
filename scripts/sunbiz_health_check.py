@@ -249,10 +249,22 @@ def _maybe_alert(rep: dict) -> bool:
     """On HIGH issues, raise an agent_alerts row (deduped over 6h) and send a
     Telegram message ONLY to a SunBiz-specific chat. Deliberately never falls
     back to the empire BRAVO_TELEGRAM_CHAT_ID — that fallback is itself a
-    cross-tenant leak (audit finding F5). Returns True if it alerted."""
+    cross-tenant leak (audit finding F5). EZRA_TELEGRAM_* is a legitimate
+    fallback: it IS the SunBiz rep channel (same bot + chat as
+    ezra-telegram-bridge and the dashboard queue monitor).
+
+    Telegram delivery rides the same 6h dedup window as the agent_alerts
+    insert — this cron runs every 30 minutes and a persistent HIGH must not
+    ping the operator 48x/day.
+
+    Returns True when alert duty is discharged (no HIGH issues, HIGH already
+    alerted within the window, or a fresh Telegram delivery succeeded).
+    Returns False when HIGH issues exist but the Telegram send failed or no
+    creds are configured — a mute watchdog is itself a P1, and the caller
+    turns False into a RED exit so tenant_cron_jobs records the failure."""
     high = rep["summary"]["HIGH"]
     if high == 0:
-        return False
+        return True
     tid = rep["tenant_id"]
     high_msgs = "; ".join(i["message"] for i in rep["issues"] if i["severity"] == "HIGH")
     sb = _client()
@@ -262,27 +274,38 @@ def _maybe_alert(rep: dict) -> bool:
                   .eq("alert_type", "health_check").gte("created_at", since).limit(1).execute().data)
     except Exception:
         recent = []
-    if not recent:
-        try:
-            sb.table("agent_alerts").insert({
-                "tenant_id": tid, "alert_type": "health_check", "severity": "urgent",
-                "subject_type": "tenant", "subject_id": tid,
-                "title": f"Health check: {high} HIGH issue(s)",
-                "payload": {"summary": rep["summary"], "issues": rep["issues"]},
-            }).execute()
-        except Exception as ex:
-            print(f"[alert] agent_alerts insert failed: {ex}", file=sys.stderr)
+    if recent:
+        return True  # already alerted inside the dedup window
+    try:
+        sb.table("agent_alerts").insert({
+            "tenant_id": tid, "alert_type": "health_check", "severity": "urgent",
+            "subject_type": "tenant", "subject_id": tid,
+            "title": f"Health check: {high} HIGH issue(s)",
+            "payload": {"summary": rep["summary"], "issues": rep["issues"]},
+        }).execute()
+    except Exception as ex:
+        print(f"[alert] agent_alerts insert failed: {ex}", file=sys.stderr)
     e = load_env()
-    tok, chat = e.get("BRAVO_TELEGRAM_BOT_TOKEN"), e.get("SUNBIZ_TELEGRAM_CHAT_ID")
-    if tok and chat:
-        try:
-            import requests
-            requests.post(f"https://api.telegram.org/bot{tok}/sendMessage",
-                          json={"chat_id": chat, "text": f"⚠️ SunBiz health: {high} HIGH\n{high_msgs}"}, timeout=10)
-        except Exception as ex:
-            print(f"[alert] telegram failed: {ex}", file=sys.stderr)
-    else:
-        print("[alert] no SunBiz Telegram chat configured (SUNBIZ_TELEGRAM_CHAT_ID); alert recorded in agent_alerts only", file=sys.stderr)
+    tok = e.get("BRAVO_TELEGRAM_BOT_TOKEN") or e.get("EZRA_TELEGRAM_BOT_TOKEN")
+    chat = e.get("SUNBIZ_TELEGRAM_CHAT_ID") or e.get("EZRA_TELEGRAM_CHAT_ID")
+    if not (tok and chat):
+        print("[alert] no SunBiz Telegram chat configured "
+              "(SUNBIZ_TELEGRAM_CHAT_ID/EZRA_TELEGRAM_CHAT_ID); "
+              "alert recorded in agent_alerts only", file=sys.stderr)
+        return False
+    try:
+        import requests
+        resp = requests.post(
+            f"https://api.telegram.org/bot{tok}/sendMessage",
+            json={"chat_id": chat, "text": f"⚠️ SunBiz health: {high} HIGH\n{high_msgs}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        if resp.json().get("ok") is not True:
+            raise RuntimeError(f"telegram API returned not-ok: {resp.text[:200]}")
+    except Exception as ex:
+        print(f"[alert] telegram failed: {ex}", file=sys.stderr)
+        return False
     return True
 
 
@@ -299,9 +322,11 @@ def main() -> int:
         _print_human(rep)
     if args.alert:
         # Monitoring mode: detecting+alerting IS success, so exit 0 (don't
-        # mark the cron run 'failed' just because issues were found).
-        _maybe_alert(rep)
-        return 0
+        # mark the cron run 'failed' just because issues were found). But a
+        # HIGH condition whose Telegram alert could not be delivered means
+        # the watchdog is mute — exit RED so the cron run itself records
+        # the failure instead of silently degrading to unread DB rows.
+        return 0 if _maybe_alert(rep) else 3
     return rep["summary"]["HIGH"]
 
 
