@@ -244,33 +244,41 @@ def _filter_matches(trigger_filter: dict, payload: dict) -> bool:
 _ASSIGNED_REP_EMAIL_CACHE: dict[str, str] = {}
 
 
-def _resolve_assigned_rep_email(sb, assigned_to: Optional[str]) -> Optional[str]:
+def _resolve_assigned_rep_email(sb, assigned_to: Optional[str],
+                                tenant_id: Optional[str] = None) -> Optional[str]:
     """Look up the assigned rep's email from user_profiles. Fail-open:
     returns None on any error or missing data — drips still send, just
     without the CC. Called per send_step so the rep stays on the drip
-    thread under SunBiz's shared-inbox From: model."""
+    thread under SunBiz's shared-inbox From: model.
+
+    Tenant-scoped (audit 2026-07-12): the service-role client bypasses RLS,
+    so a stray cross-tenant assigned_to value would otherwise resolve a
+    FOREIGN tenant's rep and CC them onto this tenant's outbound drip. The
+    tenant_id filter (and its inclusion in the cache key) prevents that."""
     if not isinstance(assigned_to, str) or not assigned_to.strip():
         return None
     auth_user_id = assigned_to.strip()
-    cached = _ASSIGNED_REP_EMAIL_CACHE.get(auth_user_id)
+    cache_key = f"{tenant_id or ''}|{auth_user_id}"
+    cached = _ASSIGNED_REP_EMAIL_CACHE.get(cache_key)
     if cached is not None:
         return cached or None  # empty string = "looked up, no email"
     try:
-        r = (
+        q = (
             sb.table("user_profiles")
             .select("email")
             .eq("auth_user_id", auth_user_id)
-            .limit(1)
-            .execute()
         )
+        if tenant_id:
+            q = q.eq("tenant_id", tenant_id)
+        r = q.limit(1).execute()
         rows = r.data or []
         email = (rows[0] or {}).get("email") if rows else ""
         if isinstance(email, str) and "@" in email:
-            _ASSIGNED_REP_EMAIL_CACHE[auth_user_id] = email
+            _ASSIGNED_REP_EMAIL_CACHE[cache_key] = email
             return email
     except Exception as e:
         _log(f"assigned_rep email lookup failed user={auth_user_id[:8]}: {e}")
-    _ASSIGNED_REP_EMAIL_CACHE[auth_user_id] = ""
+    _ASSIGNED_REP_EMAIL_CACHE[cache_key] = ""
     return None
 
 
@@ -717,6 +725,28 @@ def _build_context(sb, tenant_id: str, lead_id: str, payload: dict) -> dict:
     return ctx
 
 
+def _classify_block_reason(reason: str) -> str:
+    """Bucket a send_gateway 'blocked' reason (that carried no cooldown_until)
+    so the caller can route it without burning the retry budget:
+
+      "window"       — SMS send-window (quiet hours): transient, self-clears.
+      "cap"          — hourly/daily send cap hit: transient, self-clears.
+      "missing_data" — no timezone/state to evaluate the window: retry can
+                       never help; a human must add the data.
+      "other"        — anything else: fall back to bounded error/backoff.
+    """
+    r = (reason or "").lower()
+    # timezone-unknown is phrased as a send-window block but is a DATA gap —
+    # check it before the generic window bucket.
+    if "timezone unknown" in r or "no data.timezone" in r or "no data.state" in r:
+        return "missing_data"
+    if "send window" in r or "quiet hours" in r or "outside" in r and "window" in r:
+        return "window"
+    if "cap hit" in r or "hourly cap" in r or "daily cap" in r or "rate limit" in r:
+        return "cap"
+    return "other"
+
+
 def _send_step(sb, state_row: dict, sequence: dict) -> dict:
     """Fire the actual send via send_gateway.send. Returns a structured
     result so the execution loop can branch on the five real outcomes
@@ -820,7 +850,9 @@ def _send_step(sb, state_row: dict, sequence: dict) -> dict:
     # send. lead.assigned_to holds an auth_user_id; join through
     # user_profiles to get the email. Failure to resolve is non-fatal —
     # we send without CC rather than blocking the drip.
-    cc_email = _resolve_assigned_rep_email(sb, lead.get("assigned_to"))
+    cc_email = _resolve_assigned_rep_email(
+        sb, lead.get("assigned_to"), tenant_id=state_row.get("tenant_id")
+    )
 
     # Brand resolution by tenant. Adon brief 2026-06-08: SunBiz sends MUST
     # use the SunBiz CASL footer (submissions@sunbizfunding.com address +
@@ -885,15 +917,37 @@ def _send_step(sb, state_row: dict, sequence: dict) -> dict:
         return {"outcome": "sent", "detail": reason or "sent"}
     if status == "blocked":
         # send_gateway exposes cooldown_until ISO — use it for the
-        # reschedule instead of synthetic backoff. If it's missing,
-        # fall back to error-style backoff so we don't hot-spin on a
-        # blocked-but-no-cooldown-stamp result.
+        # reschedule instead of synthetic backoff.
         cooldown_until = res.get("cooldown_until")
         if cooldown_until:
             return {
                 "outcome": "cooldown",
                 "detail": f"blocked: {reason}",
                 "retry_after_iso": cooldown_until,
+            }
+        # No cooldown stamp. Classify the block by reason so a DETERMINISTIC,
+        # self-clearing condition never burns the 5-attempt budget and
+        # permanently fails a healthy lead (audit 2026-07-12):
+        #   - send-window / hourly-cap: transient, WILL clear on its own —
+        #     reschedule via the cooldown path (no attempt increment). +1h
+        #     re-checks the window each cycle and naturally walks forward
+        #     until it opens, no fragile tz/window math here.
+        #   - timezone-unknown / missing-data: retrying never helps (the lead
+        #     has no data.timezone/state); mark permanent so it stops
+        #     retrying and surfaces the data gap instead of spamming FAILs.
+        #   - anything else: keep the bounded error/backoff path.
+        block_kind = _classify_block_reason(reason)
+        if block_kind in ("window", "cap"):
+            retry_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+            return {
+                "outcome": "cooldown",
+                "detail": f"blocked ({block_kind}, will retry): {reason}",
+                "retry_after_iso": retry_at,
+            }
+        if block_kind == "missing_data":
+            return {
+                "outcome": "permanent",
+                "detail": f"blocked (needs data fix, retry won't help): {reason}",
             }
         return {"outcome": "error", "detail": f"blocked (no cooldown_until): {reason}"}
     if status == "suppressed":
