@@ -83,7 +83,13 @@ def resolve_env(key: str, env: dict[str, str]) -> str:
 
 
 def module_installed(module_name: str) -> bool:
-    return importlib.util.find_spec(module_name) is not None
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except (ImportError, AttributeError, ValueError):
+        # find_spec RAISES (rather than returning None) when a dotted name's
+        # parent package is absent — e.g. "google.genai" on an interpreter
+        # without the google namespace package. Doctor must report, never crash.
+        return False
 
 
 def key_is_configured(value: str) -> bool:
@@ -200,11 +206,12 @@ def build_report(*, include_live_checks: bool = False) -> dict:
         "google-genai": ("google.genai", False),
     }
     for label, (module_name, required) in module_checks.items():
+        installed = module_installed(module_name)
         checks.append(
             Check(
                 name=f"dependency:{label}",
-                status="ok" if module_installed(module_name) else ("fail" if required else "warn"),
-                detail="installed" if module_installed(module_name) else "not installed",
+                status="ok" if installed else ("fail" if required else "warn"),
+                detail="installed" if installed else "not installed",
                 required=required,
             )
         )
@@ -318,10 +325,19 @@ def build_report(*, include_live_checks: bool = False) -> dict:
         checks.append(run_gmail_login(env))
 
     required_failures = [check for check in checks if check.required and check.status == "fail"]
-    warnings = [check for check in checks if check.status == "warn"]
+    required_warnings = [check for check in checks if check.required and check.status == "warn"]
+    optional_failures = [check for check in checks if not check.required and check.status == "fail"]
+    optional_warnings = [check for check in checks if not check.required and check.status == "warn"]
+    # Verdict semantics (2026-07-12): optional checks describe DELIBERATE
+    # posture (Twilio is a never-configured failover; active SMS is
+    # Kixie/TextTorrent via the dashboard). A verdict that reads DEGRADED
+    # forever on intentional posture trains the operator to ignore it — so
+    # only required-check problems (or an optional check outright failing)
+    # move the verdict off HEALTHY. Optional warns stay visible in the
+    # check list and the summary, they just don't repaint the headline.
     if required_failures:
         verdict = "UNHEALTHY"
-    elif warnings:
+    elif required_warnings or optional_failures:
         verdict = "DEGRADED"
     else:
         verdict = "HEALTHY"
@@ -336,6 +352,7 @@ def build_report(*, include_live_checks: bool = False) -> dict:
             "ok": sum(1 for check in checks if check.status == "ok"),
             "warn": sum(1 for check in checks if check.status == "warn"),
             "fail": sum(1 for check in checks if check.status == "fail"),
+            "optional_warn": len(optional_warnings),
         },
     }
 
@@ -344,7 +361,11 @@ def print_human(report: dict) -> None:
     print("=" * 64)
     print("SOLARA PULSE CHECK")
     print("=" * 64)
-    print(f"Verdict    : {report['verdict']}")
+    verdict_line = report["verdict"]
+    optional_warn = report["summary"].get("optional_warn", 0)
+    if verdict_line == "HEALTHY" and optional_warn:
+        verdict_line += f" ({optional_warn} optional warning(s) noted — non-blocking)"
+    print(f"Verdict    : {verdict_line}")
     print(f"Checked at : {report['checked_at']}")
     print(f"Deep check : {report['deep_checks']}")
     print("")
@@ -363,7 +384,23 @@ def print_human(report: dict) -> None:
     print(f"Summary    : ok={summary['ok']} warn={summary['warn']} fail={summary['fail']}")
 
 
+def _reexec_into_venv() -> None:
+    # The operator command is "python scripts/doctor.py" with whatever python
+    # is on PATH — usually the bare system interpreter, which lacks the repo
+    # deps and would report UNHEALTHY for a healthy stack. If the repo venv
+    # exists and we are not already inside it, re-exec so the report always
+    # reflects the production runtime. Best-effort: a broken venv must not
+    # stop doctor from running with the current interpreter.
+    venv_python = PROJECT_ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    try:
+        if venv_python.exists() and Path(sys.executable).resolve() != venv_python.resolve():
+            os.execv(str(venv_python), [str(venv_python), *sys.argv])
+    except OSError:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _reexec_into_venv()
     parser = argparse.ArgumentParser(description="Sun Biz Agent production doctor")
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     parser.add_argument("--deep", action="store_true", help="Run live Gmail connectivity check")
