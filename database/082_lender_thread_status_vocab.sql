@@ -1,4 +1,16 @@
--- 082_lender_thread_status_vocab.sql
+-- 082_lender_thread_status_vocab.sql   (SunBiz-Agent repo migration series)
+--
+-- ⚠️ NUMBER COLLISION: business-empire-agent also has a database/082 (the RLS
+--    lockdown). These are two independent series on the SAME Supabase project
+--    — apply THIS one by its topic name (lender_thread_status_vocab), not by
+--    the bare number.
+-- ⚠️ AFTER APPLYING: restart the daemon —
+--       pm2 restart sunbiz-lender-response-classifier
+--    The classifier holds an in-memory "constraint-rejected statuses" backoff
+--    set (stops the pre-082 write storm). Applying this migration does NOT
+--    clear that set in a running process, so SLA flips stay suppressed until
+--    the daemon restarts.
+--
 -- Purpose: Re-add the terminal thread statuses that migration 068 dropped but
 -- that live code still writes + reads.
 --

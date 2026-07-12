@@ -87,6 +87,33 @@ def _sentinel_model() -> str:
 SENTINEL_MODEL = _sentinel_model()
 
 
+_run_claude_cli_fn = None
+
+
+def _get_run_claude_cli():
+    """Load run_claude_cli from THIS repo's scripts/lib/claude_cli.py by
+    absolute path. A plain `from lib.claude_cli import ...` is unsafe: the
+    pm2 daemon runs with BRAVO_AGENT_ROOT set, so bootstrap_bravo_path() puts
+    CEO-Agent/scripts at sys.path[0] and the `lib` package resolves to
+    CEO-Agent's lib (no claude_cli.py) -> ModuleNotFoundError -> the CLI call
+    silently no-ops and sentiment scoring falls back to deterministic-only
+    (caught in adversarial review 2026-07-12; the earlier test passed only
+    because it ran without BRAVO_AGENT_ROOT). importlib-by-path binds to the
+    SunBiz copy regardless of sys.path order."""
+    global _run_claude_cli_fn
+    if _run_claude_cli_fn is not None:
+        return _run_claude_cli_fn
+    import importlib.util
+    path = REPO_ROOT / "scripts" / "lib" / "claude_cli.py"
+    spec = importlib.util.spec_from_file_location("sunbiz_claude_cli", str(path))
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load claude_cli from {path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    _run_claude_cli_fn = mod.run_claude_cli
+    return _run_claude_cli_fn
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Tunables
 # ─────────────────────────────────────────────────────────────────────
@@ -295,7 +322,7 @@ def classify_sentiment(body: str) -> dict[str, Any]:
     source = "fallback"
 
     try:
-        from lib.claude_cli import run_claude_cli  # noqa: E402
+        run_claude_cli = _get_run_claude_cli()
         prompt = SENTINEL_PROMPT.format(body=body[:4000])
         text = run_claude_cli(prompt, model="haiku", timeout=45)
         if text:

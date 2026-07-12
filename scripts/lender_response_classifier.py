@@ -127,15 +127,47 @@ def _update_thread_status(sb, thread_id: str, tenant_id: str | None, fields: dic
         q.execute()
         return True
     except Exception as e:  # noqa: BLE001
-        if new_status and _looks_like_check_violation(e):
+        # Only ever back off a status the CURRENT constraint is known to
+        # reject. Never suppress a status that IS in the legal set: if a
+        # 'replied'/'offer_received' write fails, it is NOT a vocab problem,
+        # so a substring false-positive must not poison a legal transition
+        # for the process lifetime (adversarial review 2026-07-12).
+        if (new_status
+                and new_status not in _LEGAL_THREAD_STATUSES
+                and _looks_like_check_violation(e)):
             if new_status not in _constraint_rejected_statuses:
                 _constraint_rejected_statuses.add(new_status)
                 _log(f"status '{new_status}' rejected by DB CHECK constraint — "
                      f"suppressing further '{new_status}' writes this run "
-                     f"(needs migration 082). {e}")
+                     f"(needs migration 082 + a daemon restart). {e}")
             return False
         _log(f"thread status update failed id={thread_id}: {e}")
         return False
+
+
+_run_claude_cli_fn = None
+
+
+def _get_run_claude_cli():
+    """Load run_claude_cli from THIS repo's scripts/lib/claude_cli.py by
+    absolute path. A plain `from lib.claude_cli import ...` is unsafe here:
+    bootstrap_bravo_path() puts CEO-Agent/scripts at sys.path[0], so the `lib`
+    package resolves to CEO-Agent's lib (which has no claude_cli.py) and the
+    import raises ModuleNotFoundError — the CLI call would silently no-op and
+    scoring would fall back forever (caught in adversarial review 2026-07-12).
+    importlib-by-path binds to the SunBiz copy regardless of sys.path order."""
+    global _run_claude_cli_fn
+    if _run_claude_cli_fn is not None:
+        return _run_claude_cli_fn
+    import importlib.util
+    path = REPO_ROOT / "scripts" / "lib" / "claude_cli.py"
+    spec = importlib.util.spec_from_file_location("sunbiz_claude_cli", str(path))
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load claude_cli from {path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    _run_claude_cli_fn = mod.run_claude_cli
+    return _run_claude_cli_fn
 
 
 def _call_classifier_model(prompt: str, *, system: str | None = None) -> str | None:
@@ -145,9 +177,9 @@ def _call_classifier_model(prompt: str, *, system: str | None = None) -> str | N
     2026-07-12). Lender-reply bodies are untrusted, so the wrapper denies all
     tools. Returns the model's text, or None on any failure."""
     try:
-        from lib.claude_cli import run_claude_cli  # type: ignore  # noqa: E402
+        run_claude_cli = _get_run_claude_cli()
     except Exception as e:  # noqa: BLE001
-        _log(f"classifier model: claude_cli import failed: {e}")
+        _log(f"classifier model: claude_cli load failed: {e}")
         return None
     return run_claude_cli(prompt, system=system, model="haiku", timeout=45)
 
@@ -550,7 +582,13 @@ def classify_with_claude(body: str) -> dict:
     prompt = CLASSIFIER_PROMPT.replace("{body}", safe_body)
     text = _call_classifier_model(prompt, system=CLASSIFIER_SYSTEM)
     if not text:
-        return {"label": "unclear", "summary": "classifier model returned no output"}
+        # Infra failure (CLI/quota outage), NOT a genuine 'unclear' reply.
+        # Return a distinct 'error' label so classify_tick leaves the thread
+        # at 'sent' to retry, instead of consuming it: pre-remap, 'unclear'
+        # mapped to the CHECK-rejected 'responded' (thread stayed sent by
+        # accident); the 068-legal remap removed that protection, so make it
+        # explicit (adversarial review 2026-07-12).
+        return {"label": "error", "summary": "classifier model returned no output"}
     # Try to parse strict JSON; if Claude added prose around it, find
     # the {...} block.
     try:
@@ -931,6 +969,11 @@ def classify_tick(sb) -> int:
         if not body:
             continue
         result = classify_with_claude(body)
+        if result["label"] == "error":
+            # Model/infra failure — do NOT consume the thread. Leave it at
+            # 'sent' so the next tick reclassifies once the CLI recovers.
+            _log(f"classify_tick: model unavailable, leaving thread={r['id']} at sent")
+            continue
         new_status = LABEL_TO_STATUS.get(result["label"], "replied")
         if _update_thread_status(sb, r["id"], r.get("tenant_id"), {
             "status": new_status,
@@ -966,7 +1009,13 @@ def classify_tick(sb) -> int:
         # future shop-outs toward lenders who approve deals of similar
         # shape (industry × revenue × FICO). Best-effort — write failure
         # MUST NOT roll back the thread status update already applied above.
-        if new_status in ("approved", "declined", "info_requested", "no_response"):
+        # Gate on the classifier LABEL, not the remapped thread status.
+        # LABEL_TO_STATUS now maps approved->offer_received and
+        # info_requested->replied, so testing new_status here would only ever
+        # match 'declined' and silently drop the most valuable recommender
+        # signal — the approvals (adversarial review 2026-07-12).
+        # _persist_lender_feedback takes the label and does its own outcome map.
+        if result["label"] in ("approved", "declined", "info_requested"):
             try:
                 _persist_lender_feedback(sb, r, result["label"])
             except Exception as exc:
