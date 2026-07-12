@@ -1,0 +1,1549 @@
+{
+  "schema_version": "1.0",
+  "agent": "sunbiz-agent",
+  "generated_at": "2026-07-12T07:15:08.635369+00:00",
+  "totals": {
+    "skills": 23,
+    "scripts": 53,
+    "agents": 16,
+    "mcp_servers": 0,
+    "workflows": 11,
+    "nodes_total": 103,
+    "edges_total": 14,
+    "drift_count": 33
+  },
+  "nodes": [
+    {
+      "id": "skill:browser-automation",
+      "kind": "skill",
+      "name": "browser-automation",
+      "path": "skills/browser-automation/SKILL.md",
+      "description": "",
+      "tier": "specialized",
+      "owner": "sunbiz-agent",
+      "risk": "low",
+      "triggers": [],
+      "tags": [],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": false,
+      "argument_hint": null,
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-foldername"
+    },
+    {
+      "id": "skill:casl-compliance",
+      "kind": "skill",
+      "name": "casl-compliance",
+      "path": "skills/casl-compliance/SKILL.md",
+      "description": "Mandatory compliance gate before any outbound (email, SMS, blast). Verifies consent, opt-out status, CASL footer, send window, and daily cap.",
+      "tier": "stable",
+      "owner": "sunbiz-agent",
+      "risk": "low",
+      "triggers": [],
+      "tags": [],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": true,
+      "argument_hint": null,
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "skill:codex-delegation",
+      "kind": "skill",
+      "name": "codex-delegation",
+      "path": "skills/codex-delegation/SKILL.md",
+      "description": "Intelligent routing between Solara and Codex \u2014 decides when to delegate backend tasks to Codex vs handle internally.",
+      "tier": "stable",
+      "owner": "sunbiz-agent",
+      "risk": "low",
+      "triggers": [],
+      "tags": [
+        "skill"
+      ],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": false,
+      "argument_hint": null,
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "skill:cold-outreach-blast",
+      "kind": "skill",
+      "name": "cold-outreach-blast",
+      "path": "skills/cold-outreach-blast/SKILL.md",
+      "description": "Queue a cold outreach campaign to a segmented lead list via the cold_outreach_campaigns endpoint, with CASL compliance enforced before any send.",
+      "tier": "stable",
+      "owner": "sunbiz-agent",
+      "risk": "low",
+      "triggers": [],
+      "tags": [],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": true,
+      "argument_hint": "Which cold lead list (by name or ID) and what message template should I use?",
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "skill:daily-call-sheet-workflow",
+      "kind": "skill",
+      "name": "daily-call-sheet-workflow",
+      "path": "skills/daily-call-sheet-workflow/SKILL.md",
+      "description": "Generates the structured daily call sheet for Ezra \u2014 6 prioritized categories, specific opening lines for each call, and a clear action order.",
+      "tier": "stable",
+      "owner": "sunbiz-agent",
+      "risk": "low",
+      "triggers": [],
+      "tags": [],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": true,
+      "argument_hint": null,
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "skill:email-outbound",
+      "kind": "skill",
+      "name": "email-outbound",
+      "path": "skills/email-outbound/SKILL.md",
+      "description": "",
+      "tier": "specialized",
+      "owner": "sunbiz-agent",
+      "risk": "low",
+      "triggers": [],
+      "tags": [],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": false,
+      "argument_hint": null,
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-foldername"
+    },
+    {
+      "id": "skill:follow-up-discipline",
+      "kind": "skill",
+      "name": "follow-up-discipline",
+      "path": "skills/follow-up-discipline/SKILL.md",
+      "description": "Surfaces overdue follow-ups, prioritizes the call list, and recommends specific outreach actions for each stuck deal or contact.",
+      "tier": "stable",
+      "owner": "sunbiz-agent",
+      "risk": "low",
+      "triggers": [],
+      "tags": [],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": true,
+      "argument_hint": null,
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "skill:funding-vocabulary",
+      "kind": "skill",
+      "name": "funding-vocabulary",
+      "path": "skills/funding-vocabulary/SKILL.md",
+      "description": "Domain literacy for MCA and alternative business funding. Reference glossary and clarifying-question guide for when operators use ambiguous terms.",
+      "tier": "stable",
+      "owner": "sunbiz-agent",
+      "risk": "low",
+      "triggers": [],
+      "tags": [],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": true,
+      "argument_hint": null,
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "skill:image-generation",
+      "kind": "skill",
+      "name": "image-generation",
+      "path": "skills/image-generation/SKILL.md",
+      "description": "",
+      "tier": "specialized",
+      "owner": "sunbiz-agent",
+      "risk": "low",
+      "triggers": [],
+      "tags": [],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": false,
+      "argument_hint": null,
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-foldername"
+    },
+    {
+      "id": "skill:lead-generation",
+      "kind": "skill",
+      "name": "lead-generation",
+      "path": "skills/lead-generation/SKILL.md",
+      "description": "",
+      "tier": "specialized",
+      "owner": "sunbiz-agent",
+      "risk": "low",
+      "triggers": [],
+      "tags": [],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": false,
+      "argument_hint": null,
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-foldername"
+    },
+    {
+      "id": "skill:lender-intelligence",
+      "kind": "skill",
+      "name": "lender-intelligence",
+      "path": "skills/lender-intelligence/SKILL.md",
+      "description": "Uses historical lender feedback data to recommend the best lenders for a specific deal profile and surfaces typical terms and decline patterns.",
+      "tier": "stable",
+      "owner": "sunbiz-agent",
+      "risk": "low",
+      "triggers": [],
+      "tags": [],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": true,
+      "argument_hint": "What's the deal profile? (industry, monthly revenue, FICO, position count, NSF count)",
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "skill:lending-industry",
+      "kind": "skill",
+      "name": "lending-industry",
+      "path": "skills/lending-industry/SKILL.md",
+      "description": "",
+      "tier": "specialized",
+      "owner": "sunbiz-agent",
+      "risk": "low",
+      "triggers": [],
+      "tags": [],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": false,
+      "argument_hint": null,
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-foldername"
+    },
+    {
+      "id": "skill:media-upload",
+      "kind": "skill",
+      "name": "media-upload",
+      "path": "skills/media-upload/SKILL.md",
+      "description": "",
+      "tier": "specialized",
+      "owner": "sunbiz-agent",
+      "risk": "low",
+      "triggers": [],
+      "tags": [],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": false,
+      "argument_hint": null,
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-foldername"
+    },
+    {
+      "id": "skill:memory-journaling",
+      "kind": "skill",
+      "name": "memory-journaling",
+      "path": "skills/memory-journaling/SKILL.md",
+      "description": "Structured decision and pattern logging. Guides Solara through writing high-quality entries to memory/DECISIONS.md, memory/PATTERNS.md, or memory/MISTAKES.md with proper frontmatter, cross-links, and version tags.",
+      "tier": "stable",
+      "owner": "solara",
+      "risk": "low",
+      "triggers": [],
+      "tags": [
+        "skill",
+        "memory",
+        "journaling",
+        "decisions",
+        "patterns"
+      ],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": false,
+      "argument_hint": null,
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "skill:operator-handoff",
+      "kind": "skill",
+      "name": "operator-handoff",
+      "path": "skills/operator-handoff/SKILL.md",
+      "description": "Pause cleanly at a decision boundary, surface the decision to Ezra via Telegram or dashboard chat, and wait for explicit confirmation before proceeding.",
+      "tier": "stable",
+      "owner": "sunbiz-agent",
+      "risk": "low",
+      "triggers": [],
+      "tags": [],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": true,
+      "argument_hint": null,
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "skill:renewal-window-detection",
+      "kind": "skill",
+      "name": "renewal-window-detection",
+      "path": "skills/renewal-window-detection/SKILL.md",
+      "description": "Identifies funded deals that have crossed the renewal eligibility threshold (default 40% paid back) and drafts targeted renewal outreach for each.",
+      "tier": "stable",
+      "owner": "sunbiz-agent",
+      "risk": "low",
+      "triggers": [],
+      "tags": [],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": true,
+      "argument_hint": null,
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "skill:reporting-analytics",
+      "kind": "skill",
+      "name": "reporting-analytics",
+      "path": "skills/reporting-analytics/SKILL.md",
+      "description": "",
+      "tier": "specialized",
+      "owner": "sunbiz-agent",
+      "risk": "low",
+      "triggers": [],
+      "tags": [],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": false,
+      "argument_hint": null,
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-foldername"
+    },
+    {
+      "id": "skill:self-healing",
+      "kind": "skill",
+      "name": "self-healing",
+      "path": "skills/self-healing/SKILL.md",
+      "description": "",
+      "tier": "specialized",
+      "owner": "sunbiz-agent",
+      "risk": "low",
+      "triggers": [],
+      "tags": [],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": false,
+      "argument_hint": null,
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-foldername"
+    },
+    {
+      "id": "skill:seo-aeo",
+      "kind": "skill",
+      "name": "seo-aeo",
+      "path": "skills/seo-aeo/SKILL.md",
+      "description": "",
+      "tier": "specialized",
+      "owner": "sunbiz-agent",
+      "risk": "low",
+      "triggers": [],
+      "tags": [],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": false,
+      "argument_hint": null,
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-foldername"
+    },
+    {
+      "id": "skill:shop-out-routing",
+      "kind": "skill",
+      "name": "shop-out-routing",
+      "path": "skills/shop-out-routing/SKILL.md",
+      "description": "When operator says \"shop this deal,\" route the application to the right lenders, surface the dry-run plan with warnings, and queue the actual threads.",
+      "tier": "stable",
+      "owner": "sunbiz-agent",
+      "risk": "low",
+      "triggers": [],
+      "tags": [],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": true,
+      "argument_hint": "Which application ID (or applicant name) should I shop out?",
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "skill:systematic-debugging",
+      "kind": "skill",
+      "name": "systematic-debugging",
+      "path": "skills/systematic-debugging/SKILL.md",
+      "description": "Use when encountering any bug, test failure, or unexpected behavior in SunBiz-Agent systems \u2014 before proposing any fix.",
+      "tier": "stable",
+      "owner": "sunbiz-agent",
+      "risk": "low",
+      "triggers": [],
+      "tags": [],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": false,
+      "argument_hint": null,
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "skill:underwriting-flow",
+      "kind": "skill",
+      "name": "underwriting-flow",
+      "path": "skills/underwriting-flow/SKILL.md",
+      "description": "Trigger and interpret underwriting on an application \u2014 parse bank statements, read risk flags, produce a readiness score, and recommend the next action.",
+      "tier": "stable",
+      "owner": "sunbiz-agent",
+      "risk": "low",
+      "triggers": [],
+      "tags": [],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": true,
+      "argument_hint": "Which application ID should I run underwriting on?",
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "skill:video-editing",
+      "kind": "skill",
+      "name": "video-editing",
+      "path": "skills/video-editing/SKILL.md",
+      "description": "",
+      "tier": "specialized",
+      "owner": "sunbiz-agent",
+      "risk": "low",
+      "triggers": [],
+      "tags": [],
+      "status": "[VALIDATED]",
+      "disable_model_invocation": false,
+      "argument_hint": null,
+      "requires": {
+        "env": [],
+        "daemons": [],
+        "state": []
+      },
+      "archived": null,
+      "superseded_by": null,
+      "discovery": "auto-foldername"
+    },
+    {
+      "id": "script:ab_testing_engine",
+      "kind": "script",
+      "name": "ab_testing_engine",
+      "path": "scripts/ab_testing_engine.py",
+      "description": "SunBiz Funding - A/B Testing & Budget Optimization Engine ========================================================== Bayesian optimization via Facebook's Ax platform (ax-platform). Falls back to heuristic-based optimization when ax-platform is not installed.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:ad_copy_generator",
+      "kind": "script",
+      "name": "ad_copy_generator",
+      "path": "scripts/ad_copy_generator.py",
+      "description": "SunBiz Funding - AI Ad Copy Generator ======================================= Generates MCA-compliant ad copy for SunBiz Funding campaigns.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:adon_seed_lender_constraints",
+      "kind": "script",
+      "name": "adon_seed_lender_constraints",
+      "path": "scripts/adon_seed_lender_constraints.py",
+      "description": "SunBiz \u2014 interactive seeder for lender restricted_states + restricted_industries ================================================================================ The SOP \u00a74 scoring in oasis-command-center's lib/lenders/match-fitness.ts consumes lender.restricted_states[] and lend",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:agent_genome",
+      "kind": "script",
+      "name": "agent_genome",
+      "path": "scripts/agent_genome.py",
+      "description": "agent_genome.py \u2014 verify an agent repo fully expresses the genome.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:agent_sleep",
+      "kind": "script",
+      "name": "agent_sleep",
+      "path": "scripts/agent_sleep.py",
+      "description": "agent_sleep \u2014 Nightly memory consolidation by an LLM judge.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:api_server",
+      "kind": "script",
+      "name": "api_server",
+      "path": "scripts/api_server.py",
+      "description": "Sun Biz Agent hosted API surface.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:audit_logger",
+      "kind": "script",
+      "name": "audit_logger",
+      "path": "scripts/audit_logger.py",
+      "description": "Campaign audit logging \u2014 tracks every change made via the API. ============================================================== Appends structured JSON Lines records to data/audit/audit_log.jsonl. Each line is one self-contained AuditEntry serialised as JSON.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:backfill_sunbiz_stages",
+      "kind": "script",
+      "name": "backfill_sunbiz_stages",
+      "path": "scripts/backfill_sunbiz_stages.py",
+      "description": "backfill_sunbiz_stages.py \u2014 one-shot migration of pre-2026-05-17 stage values.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:bridge_tool_underwriting_run",
+      "kind": "script",
+      "name": "bridge_tool_underwriting_run",
+      "path": "scripts/bridge_tool_underwriting_run.py",
+      "description": "bridge_tool_underwriting_run.py \u2014 SunBiz underwriting bridge-tool body.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:build_capability_graph",
+      "kind": "script",
+      "name": "build_capability_graph",
+      "path": "scripts/build_capability_graph.py",
+      "description": "Build Capability Graph \u2014 auto-discover every skill, script, agent, MCP server, workflow, and integration in this repo and emit a single machine-readable graph at brain/CAPABILITY_GRAPH.json.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:cache_layer",
+      "kind": "script",
+      "name": "cache_layer",
+      "path": "scripts/cache_layer.py",
+      "description": "TTL-based caching layer for Meta and Google Ads API responses. ============================================================== File-based cache stored as JSON in data/cache/. Each cache entry is a separate .json file containing the value and an expiry timestamp.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:capability_query",
+      "kind": "script",
+      "name": "capability_query",
+      "path": "scripts/capability_query.py",
+      "description": "Capability Query \u2014 runtime tool-tree resolver for agents.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:cold_outreach_runner",
+      "kind": "script",
+      "name": "cold_outreach_runner",
+      "path": "scripts/cold_outreach_runner.py",
+      "description": "cold_outreach_runner.py \u2014 drain cold_outreach_campaigns through send_gateway.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:daily_plan_generator",
+      "kind": "script",
+      "name": "daily_plan_generator",
+      "path": "scripts/daily_plan_generator.py",
+      "description": "daily_plan_generator.py \u2014 build today's daily_plan_items for the operator's Daily Plan tab.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:diag_lead_visibility",
+      "kind": "script",
+      "name": "diag_lead_visibility",
+      "path": "scripts/diag_lead_visibility.py",
+      "description": "One-off diagnostic for the 'where did my imported leads go?' question.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:diag_manifest_drift",
+      "kind": "script",
+      "name": "diag_manifest_drift",
+      "path": "scripts/diag_manifest_drift.py",
+      "description": "Check whether tenant_manifests DB row for slug='sun' matches the in-code SUN_SEED. The DB row wins at runtime \u2014 if it's stale, all the seeds.ts edits this session don't take effect for the live tenant.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:doctor",
+      "kind": "script",
+      "name": "doctor",
+      "path": "scripts/doctor.py",
+      "description": "Sun Biz Agent runtime doctor.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:email_blast",
+      "kind": "script",
+      "name": "email_blast",
+      "path": "scripts/email_blast.py",
+      "description": "SunBiz Funding \u2014 Production-Grade Gmail Email Blast Engine =========================================================== Thread-safe, rate-limited bulk email sender with CAN-SPAM compliance, unsubscribe management, campaign tracking, and exponential-backoff retries.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:enrich_leads",
+      "kind": "script",
+      "name": "enrich_leads",
+      "path": "scripts/enrich_leads.py",
+      "description": "enrich_leads.py \u2014 Google Sheets lead-enrichment workflow tool.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:follow_up_generator",
+      "kind": "script",
+      "name": "follow_up_generator",
+      "path": "scripts/follow_up_generator.py",
+      "description": "follow_up_generator.py \u2014 generate follow_up_tasks for stuck/missing-info/no-response leads.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:full_diagnostic",
+      "kind": "script",
+      "name": "full_diagnostic",
+      "path": "scripts/full_diagnostic.py",
+      "description": "Full diagnostic \u2014 SunBiz Meta Ads health check.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:generate_google_ads_token",
+      "kind": "script",
+      "name": "generate_google_ads_token",
+      "path": "scripts/generate_google_ads_token.py",
+      "description": "Generate Google Ads OAuth token JSON for the cohnen/mcp-google-ads server.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:generate_logo",
+      "kind": "script",
+      "name": "generate_logo",
+      "path": "scripts/generate_logo.py",
+      "description": "Generate a clean SunBiz Funding logo with transparent background using Gemini.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:generate_page_assets",
+      "kind": "script",
+      "name": "generate_page_assets",
+      "path": "scripts/generate_page_assets.py",
+      "description": "Generate Facebook page profile picture and cover photo using Gemini.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:genome_sync",
+      "kind": "script",
+      "name": "genome_sync",
+      "path": "scripts/genome_sync.py",
+      "description": "genome_sync.py \u2014 stamp the germline seed (PERSONAL.md) into every runtime entry point.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:imagen_generate",
+      "kind": "script",
+      "name": "imagen_generate",
+      "path": "scripts/imagen_generate.py",
+      "description": "SunBiz Funding \u2014 Production-Grade AI Ad Creative Generator =========================================================== Gemini Imagen (Nano Banana) + Pillow Logo Compositing",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:import_lender_catalog",
+      "kind": "script",
+      "name": "import_lender_catalog",
+      "path": "scripts/import_lender_catalog.py",
+      "description": "import_lender_catalog.py \u2014 bulk import / update known_funding_companies.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:import_mca_leads",
+      "kind": "script",
+      "name": "import_mca_leads",
+      "path": "scripts/import_mca_leads.py",
+      "description": "import_mca_leads.py \u2014 bulk-import Adon's MCA web-form lead list into the SunBiz tenant.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:kixie_tool",
+      "kind": "script",
+      "name": "kixie_tool",
+      "path": "scripts/kixie_tool.py",
+      "description": "Kixie CLI Tool \u2014 outbound dialer + click-to-call + live transfer.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:lender_response_classifier",
+      "kind": "script",
+      "name": "lender_response_classifier",
+      "path": "scripts/lender_response_classifier.py",
+      "description": "lender_response_classifier.py \u2014 close the loop on lender shop-out.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:mca_lead_scrubber",
+      "kind": "script",
+      "name": "mca_lead_scrubber",
+      "path": "scripts/mca_lead_scrubber.py",
+      "description": "mca_lead_scrubber.py \u2014 the \"Breeze UW Entry Sheet\" automation.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:migrate_leads_to_tenant_records",
+      "kind": "script",
+      "name": "migrate_leads_to_tenant_records",
+      "path": "scripts/migrate_leads_to_tenant_records.py",
+      "description": "migrate_leads_to_tenant_records.py ==================================",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:monitoring",
+      "kind": "script",
+      "name": "monitoring",
+      "path": "scripts/monitoring.py",
+      "description": "Real-time campaign monitoring, anomaly detection, and alerting system. ======================================================================= Wraps a MetaAdsEngine instance to provide scheduled health checks, anomaly detection, budget pacing alerts, CTR/CPC deviation alerts, dis",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:no_contact_24h_monitor",
+      "kind": "script",
+      "name": "no_contact_24h_monitor",
+      "path": "scripts/no_contact_24h_monitor.py",
+      "description": "no_contact_24h_monitor.py \u2014 Build 1: active-deal 24h-no-contact follow-up.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:performance_reporter",
+      "kind": "script",
+      "name": "performance_reporter",
+      "path": "scripts/performance_reporter.py",
+      "description": "SunBiz Funding \u2014 Performance Reporter ======================================== Pulls Meta Ads performance data and formats it into clean human-readable reports. Uses MetaAdsEngine for all API calls \u2014 no direct HTTP calls here.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:populate_sunbiz_lender_catalog",
+      "kind": "script",
+      "name": "populate_sunbiz_lender_catalog",
+      "path": "scripts/populate_sunbiz_lender_catalog.py",
+      "description": "populate_sunbiz_lender_catalog.py \u2014 load the SOP-curated SunBiz lender catalog into `tenant_records` so the dashboard's /lenders directory and the Shopping Out tab render every funder from `Lender List SOP.pdf`.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:reconcile_sunbiz_sequences",
+      "kind": "script",
+      "name": "reconcile_sunbiz_sequences",
+      "path": "scripts/reconcile_sunbiz_sequences.py",
+      "description": "Reconcile drip_sequences in the live Sun Biz tenant against the post-migration-064 seed in lib/sunbiz-default-sequences.ts.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:renewal_reminder",
+      "kind": "script",
+      "name": "renewal_reminder",
+      "path": "scripts/renewal_reminder.py",
+      "description": "renewal_reminder.py \u2014 daily sweep of funded deals approaching renewal window.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:repair_sunbiz_sequence_bodies",
+      "kind": "script",
+      "name": "repair_sunbiz_sequence_bodies",
+      "path": "scripts/repair_sunbiz_sequence_bodies.py",
+      "description": "repair_sunbiz_sequence_bodies.py \u2014 one-off repair for the 2026-05-25 seeding defect that left every SunBiz drip_sequences row without message content.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:save_logo",
+      "kind": "script",
+      "name": "save_logo",
+      "path": "scripts/save_logo.py",
+      "description": "Save the SunBiz Funding logo to media/brand/sunbiz_logo.png",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:send_gateway",
+      "kind": "script",
+      "name": "send_gateway",
+      "path": "scripts/send_gateway.py",
+      "description": "Send Gateway \u2014 the single outbound chokepoint for every autonomous action Bravo performs on behalf of CC's empire.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:sentinel",
+      "kind": "script",
+      "name": "sentinel",
+      "path": "scripts/sentinel.py",
+      "description": "sentinel.py \u2014 merchant-reply sentiment scorer + auto-pause arbiter.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:sequence_runner",
+      "kind": "script",
+      "name": "sequence_runner",
+      "path": "scripts/sequence_runner.py",
+      "description": "sequence_runner.py \u2014 drip-campaign daemon (Phase 4.3 of SunBiz CRM).",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:setup",
+      "kind": "script",
+      "name": "setup",
+      "path": "scripts/setup.py",
+      "description": "Sun Biz Agent setup script.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:setup_check",
+      "kind": "script",
+      "name": "setup_check",
+      "path": "scripts/setup_check.py",
+      "description": "setup_check.py \u2014 SunBiz Day-1 readiness gate.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:shop_out_sender",
+      "kind": "script",
+      "name": "shop_out_sender",
+      "path": "scripts/shop_out_sender.py",
+      "description": "shop_out_sender.py \u2014 Phase 6.3-bis + migration 069 (2026-05-25). 2026-05-25 meeting expansion: owner_phone substitution added so outbound shop-out emails carry the assigned rep's direct number, not the brand identity default. Requires migration 069 `owner_phone` column on applica",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:sms_engine",
+      "kind": "script",
+      "name": "sms_engine",
+      "path": "scripts/sms_engine.py",
+      "description": "Sun Biz Agent \u2014 Multi-Provider SMS Engine (V1).",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:sunbiz_constants",
+      "kind": "script",
+      "name": "sunbiz_constants",
+      "path": "scripts/sunbiz_constants.py",
+      "description": "sunbiz_constants.py \u2014 single source of truth for SunBiz tenant identity.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:sunbiz_guards",
+      "kind": "script",
+      "name": "sunbiz_guards",
+      "path": "scripts/sunbiz_guards.py",
+      "description": "sunbiz_guards.py \u2014 SunBiz-specific outbound-guard configuration.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:sunbiz_health_check",
+      "kind": "script",
+      "name": "sunbiz_health_check",
+      "path": "scripts/sunbiz_health_check.py",
+      "description": "sunbiz_health_check.py \u2014 standing read-only auditor for the SunBiz backend.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:text_torrent_tool",
+      "kind": "script",
+      "name": "text_torrent_tool",
+      "path": "scripts/text_torrent_tool.py",
+      "description": "TextTorrent CLI Tool \u2014 direct API client for SMS blast + analytics + local- area-code phone management.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:underwriting_orchestrator",
+      "kind": "script",
+      "name": "underwriting_orchestrator",
+      "path": "scripts/underwriting_orchestrator.py",
+      "description": "underwriting_orchestrator.py \u2014 automatic underwriting daemon.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "script:uw_lead_enricher",
+      "kind": "script",
+      "name": "uw_lead_enricher",
+      "path": "scripts/uw_lead_enricher.py",
+      "description": "uw_lead_enricher.py - keep approved Breeze UW leads complete.",
+      "tier": "tool",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-docstring"
+    },
+    {
+      "id": "agent:ad-strategist",
+      "kind": "agent",
+      "name": "ad-strategist",
+      "path": "agents/ad-strategist.md",
+      "description": "",
+      "owner": "sunbiz-agent",
+      "tier": "specialized",
+      "discovery": "auto-filename"
+    },
+    {
+      "id": "agent:analytics-analyst",
+      "kind": "agent",
+      "name": "analytics-analyst",
+      "path": "agents/analytics-analyst.md",
+      "description": "",
+      "owner": "sunbiz-agent",
+      "tier": "specialized",
+      "discovery": "auto-filename"
+    },
+    {
+      "id": "agent:architect",
+      "kind": "agent",
+      "name": "architect",
+      "path": "agents/architect.md",
+      "description": "",
+      "owner": "sunbiz-agent",
+      "tier": "specialized",
+      "discovery": "auto-filename"
+    },
+    {
+      "id": "agent:audience-builder",
+      "kind": "agent",
+      "name": "audience-builder",
+      "path": "agents/audience-builder.md",
+      "description": "",
+      "owner": "sunbiz-agent",
+      "tier": "specialized",
+      "discovery": "auto-filename"
+    },
+    {
+      "id": "agent:content-creator",
+      "kind": "agent",
+      "name": "content-creator",
+      "path": "agents/content-creator.md",
+      "description": "",
+      "owner": "sunbiz-agent",
+      "tier": "specialized",
+      "discovery": "auto-filename"
+    },
+    {
+      "id": "agent:debugger",
+      "kind": "agent",
+      "name": "debugger",
+      "path": "agents/debugger.md",
+      "description": "",
+      "owner": "sunbiz-agent",
+      "tier": "specialized",
+      "discovery": "auto-filename"
+    },
+    {
+      "id": "agent:documenter",
+      "kind": "agent",
+      "name": "documenter",
+      "path": "agents/documenter.md",
+      "description": "",
+      "owner": "sunbiz-agent",
+      "tier": "specialized",
+      "discovery": "auto-filename"
+    },
+    {
+      "id": "agent:email-outbound",
+      "kind": "agent",
+      "name": "email-outbound",
+      "path": "agents/email-outbound.md",
+      "description": "",
+      "owner": "sunbiz-agent",
+      "tier": "specialized",
+      "discovery": "auto-filename"
+    },
+    {
+      "id": "agent:explorer",
+      "kind": "agent",
+      "name": "explorer",
+      "path": "agents/explorer.md",
+      "description": "",
+      "owner": "sunbiz-agent",
+      "tier": "specialized",
+      "discovery": "auto-filename"
+    },
+    {
+      "id": "agent:google-ads-specialist",
+      "kind": "agent",
+      "name": "google-ads-specialist",
+      "path": "agents/google-ads-specialist.md",
+      "description": "",
+      "owner": "sunbiz-agent",
+      "tier": "specialized",
+      "discovery": "auto-filename"
+    },
+    {
+      "id": "agent:image-generator",
+      "kind": "agent",
+      "name": "image-generator",
+      "path": "agents/image-generator.md",
+      "description": "",
+      "owner": "sunbiz-agent",
+      "tier": "specialized",
+      "discovery": "auto-filename"
+    },
+    {
+      "id": "agent:media-manager",
+      "kind": "agent",
+      "name": "media-manager",
+      "path": "agents/media-manager.md",
+      "description": "",
+      "owner": "sunbiz-agent",
+      "tier": "specialized",
+      "discovery": "auto-filename"
+    },
+    {
+      "id": "agent:meta-ads-specialist",
+      "kind": "agent",
+      "name": "meta-ads-specialist",
+      "path": "agents/meta-ads-specialist.md",
+      "description": "",
+      "owner": "sunbiz-agent",
+      "tier": "specialized",
+      "discovery": "auto-filename"
+    },
+    {
+      "id": "agent:seo-specialist",
+      "kind": "agent",
+      "name": "seo-specialist",
+      "path": "agents/seo-specialist.md",
+      "description": "",
+      "owner": "sunbiz-agent",
+      "tier": "specialized",
+      "discovery": "auto-filename"
+    },
+    {
+      "id": "agent:video-editor",
+      "kind": "agent",
+      "name": "video-editor",
+      "path": "agents/video-editor.md",
+      "description": "",
+      "owner": "sunbiz-agent",
+      "tier": "specialized",
+      "discovery": "auto-filename"
+    },
+    {
+      "id": "agent:workflow-builder",
+      "kind": "agent",
+      "name": "workflow-builder",
+      "path": "agents/workflow-builder.md",
+      "description": "",
+      "owner": "sunbiz-agent",
+      "tier": "specialized",
+      "discovery": "auto-filename"
+    },
+    {
+      "id": "workflow:ad-launch",
+      "kind": "workflow",
+      "name": "ad-launch",
+      "path": ".agents/workflows/ad-launch.md",
+      "description": "Create and launch new ads within an existing campaign \u2014 copy, creative, compliance, and activation.",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "workflow:audience",
+      "kind": "workflow",
+      "name": "audience",
+      "path": ".agents/workflows/audience.md",
+      "description": "Build or refine targeting audiences \u2014 keywords, custom audiences, lookalikes, and interest-based targeting.",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "workflow:campaign-create",
+      "kind": "workflow",
+      "name": "campaign-create",
+      "path": ".agents/workflows/campaign-create.md",
+      "description": "Full campaign creation wizard \u2014 platform selection, strategy, SEO keywords, copy, creative, compliance check, and launch.",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "workflow:commit",
+      "kind": "workflow",
+      "name": "commit",
+      "path": ".agents/workflows/commit.md",
+      "description": "Smart git commit with secret scanning, referential integrity checks, and capability count verification.",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "workflow:debug",
+      "kind": "workflow",
+      "name": "debug",
+      "path": ".agents/workflows/debug.md",
+      "description": "Systematic 4-phase debugging \u2014 investigate, pattern analysis, hypothesis testing, and documented resolution.",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "workflow:health",
+      "kind": "workflow",
+      "name": "health",
+      "path": ".agents/workflows/health.md",
+      "description": "Full system diagnostic \u2014 API connectivity, token validity, campaign health, compliance, and infrastructure checks.",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "workflow:optimize",
+      "kind": "workflow",
+      "name": "optimize",
+      "path": ".agents/workflows/optimize.md",
+      "description": "Analyze underperforming campaigns and apply data-driven optimizations to creative, audience, budget, and bidding.",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "workflow:performance",
+      "kind": "workflow",
+      "name": "performance",
+      "path": ".agents/workflows/performance.md",
+      "description": "Pull cross-platform ad performance metrics with insights and actionable recommendations.",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "workflow:prime",
+      "kind": "workflow",
+      "name": "prime",
+      "path": ".agents/workflows/prime.md",
+      "description": "Load full agent context \u2014 brain, memory, state, and quick health check for session start.",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "workflow:report",
+      "kind": "workflow",
+      "name": "report",
+      "path": ".agents/workflows/report.md",
+      "description": "Generate comprehensive performance reports \u2014 daily snapshots, weekly analysis, or monthly executive summaries.",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-frontmatter"
+    },
+    {
+      "id": "workflow:sync",
+      "kind": "workflow",
+      "name": "sync",
+      "path": ".agents/workflows/sync.md",
+      "description": "End-of-session sync \u2014 update state, tasks, session log, capture patterns, and commit to git.",
+      "owner": "sunbiz-agent",
+      "discovery": "auto-frontmatter"
+    }
+  ],
+  "edges": [
+    {
+      "from": "skill:casl-compliance",
+      "to": "script:api_server",
+      "kind": "uses"
+    },
+    {
+      "from": "skill:cold-outreach-blast",
+      "to": "script:api_server",
+      "kind": "uses"
+    },
+    {
+      "from": "skill:cold-outreach-blast",
+      "to": "skill:casl-compliance",
+      "kind": "requires"
+    },
+    {
+      "from": "skill:cold-outreach-blast",
+      "to": "skill:follow-up-discipline",
+      "kind": "requires"
+    },
+    {
+      "from": "skill:daily-call-sheet-workflow",
+      "to": "script:api_server",
+      "kind": "uses"
+    },
+    {
+      "from": "skill:email-outbound",
+      "to": "script:email_blast",
+      "kind": "uses"
+    },
+    {
+      "from": "skill:follow-up-discipline",
+      "to": "script:api_server",
+      "kind": "uses"
+    },
+    {
+      "from": "skill:funding-vocabulary",
+      "to": "script:api_server",
+      "kind": "uses"
+    },
+    {
+      "from": "skill:lender-intelligence",
+      "to": "script:api_server",
+      "kind": "uses"
+    },
+    {
+      "from": "skill:memory-journaling",
+      "to": "skill:lender-intelligence",
+      "kind": "requires"
+    },
+    {
+      "from": "skill:operator-handoff",
+      "to": "script:api_server",
+      "kind": "uses"
+    },
+    {
+      "from": "skill:renewal-window-detection",
+      "to": "script:api_server",
+      "kind": "uses"
+    },
+    {
+      "from": "skill:shop-out-routing",
+      "to": "script:api_server",
+      "kind": "uses"
+    },
+    {
+      "from": "skill:underwriting-flow",
+      "to": "script:api_server",
+      "kind": "uses"
+    }
+  ],
+  "drift": [
+    {
+      "node": "skill:browser-automation",
+      "issue": "skill missing description in frontmatter"
+    },
+    {
+      "node": "skill:browser-automation",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    },
+    {
+      "node": "skill:casl-compliance",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    },
+    {
+      "node": "skill:codex-delegation",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    },
+    {
+      "node": "skill:cold-outreach-blast",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    },
+    {
+      "node": "skill:daily-call-sheet-workflow",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    },
+    {
+      "node": "skill:email-outbound",
+      "issue": "skill missing description in frontmatter"
+    },
+    {
+      "node": "skill:email-outbound",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    },
+    {
+      "node": "skill:follow-up-discipline",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    },
+    {
+      "node": "skill:funding-vocabulary",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    },
+    {
+      "node": "skill:image-generation",
+      "issue": "skill missing description in frontmatter"
+    },
+    {
+      "node": "skill:image-generation",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    },
+    {
+      "node": "skill:lead-generation",
+      "issue": "skill missing description in frontmatter"
+    },
+    {
+      "node": "skill:lead-generation",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    },
+    {
+      "node": "skill:lender-intelligence",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    },
+    {
+      "node": "skill:lending-industry",
+      "issue": "skill missing description in frontmatter"
+    },
+    {
+      "node": "skill:lending-industry",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    },
+    {
+      "node": "skill:media-upload",
+      "issue": "skill missing description in frontmatter"
+    },
+    {
+      "node": "skill:media-upload",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    },
+    {
+      "node": "skill:memory-journaling",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    },
+    {
+      "node": "skill:operator-handoff",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    },
+    {
+      "node": "skill:renewal-window-detection",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    },
+    {
+      "node": "skill:reporting-analytics",
+      "issue": "skill missing description in frontmatter"
+    },
+    {
+      "node": "skill:reporting-analytics",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    },
+    {
+      "node": "skill:self-healing",
+      "issue": "skill missing description in frontmatter"
+    },
+    {
+      "node": "skill:self-healing",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    },
+    {
+      "node": "skill:seo-aeo",
+      "issue": "skill missing description in frontmatter"
+    },
+    {
+      "node": "skill:seo-aeo",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    },
+    {
+      "node": "skill:shop-out-routing",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    },
+    {
+      "node": "skill:systematic-debugging",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    },
+    {
+      "node": "skill:underwriting-flow",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    },
+    {
+      "node": "skill:video-editing",
+      "issue": "skill missing description in frontmatter"
+    },
+    {
+      "node": "skill:video-editing",
+      "issue": "skill has no triggers \u2014 agent can't route to it"
+    }
+  ]
+}
