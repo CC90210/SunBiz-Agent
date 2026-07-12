@@ -282,59 +282,45 @@ def classify_sentiment(body: str) -> dict[str, Any]:
         return {"score": 0, "reason": "empty body", "frustration_signals": [],
                 "positive_signals": [], "source": "fallback"}
 
-    # Try LLM first
-    api_key = _load_env_var("ANTHROPIC_API_KEY") or _load_env_var("BRAVO_ANTHROPIC_API_KEY")
+    # Try LLM first — via the LOCAL claude CLI on the subscription OAuth
+    # (scripts/lib/claude_cli.py), NEVER the metered ANTHROPIC_API_KEY. The
+    # old raw api.anthropic.com path (removed 2026-07-12) had been failing
+    # with a dead key — 92 consecutive HTTP 400s since 2026-07-02 — so scoring
+    # silently ran deterministic-fallback-only. The merchant reply is
+    # untrusted content, so run_claude_cli denies all tools by construction.
     llm_score = 0
     llm_reason = "fallback: no LLM"
     llm_frustration: list[str] = []
     llm_positive: list[str] = []
     source = "fallback"
 
-    if api_key:
-        try:
-            import requests
-            prompt = SENTINEL_PROMPT.format(body=body[:4000])
-            r = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": SENTINEL_MODEL,
-                    "max_tokens": 250,
-                    "messages": [{"role": "user", "content": prompt}],
-                },
-                timeout=30,
-            )
-            if r.status_code < 400:
-                data = r.json()
-                text = "".join(
-                    blk.get("text", "")
-                    for blk in data.get("content", [])
-                    if blk.get("type") == "text"
-                ).strip()
-                s, e = text.find("{"), text.rfind("}")
-                if s != -1 and e > s:
-                    try:
-                        parsed = json.loads(text[s : e + 1])
-                        llm_score = int(parsed.get("score", 0))
-                        llm_score = max(-100, min(100, llm_score))
-                        llm_reason = str(parsed.get("reason", ""))[:200]
-                        llm_frustration = [
-                            str(x) for x in (parsed.get("frustration_signals") or [])
-                        ]
-                        llm_positive = [
-                            str(x) for x in (parsed.get("positive_signals") or [])
-                        ]
-                        source = "llm"
-                    except (json.JSONDecodeError, ValueError, TypeError) as exc:
-                        _log(f"classify_sentiment: LLM parse fail: {exc}")
+    try:
+        from lib.claude_cli import run_claude_cli  # noqa: E402
+        prompt = SENTINEL_PROMPT.format(body=body[:4000])
+        text = run_claude_cli(prompt, model="haiku", timeout=45)
+        if text:
+            s, e = text.find("{"), text.rfind("}")
+            if s != -1 and e > s:
+                try:
+                    parsed = json.loads(text[s : e + 1])
+                    llm_score = int(parsed.get("score", 0))
+                    llm_score = max(-100, min(100, llm_score))
+                    llm_reason = str(parsed.get("reason", ""))[:200]
+                    llm_frustration = [
+                        str(x) for x in (parsed.get("frustration_signals") or [])
+                    ]
+                    llm_positive = [
+                        str(x) for x in (parsed.get("positive_signals") or [])
+                    ]
+                    source = "llm"
+                except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                    _log(f"classify_sentiment: LLM parse fail: {exc}")
             else:
-                _log(f"classify_sentiment: Anthropic HTTP {r.status_code}")
-        except Exception as exc:  # noqa: BLE001
-            _log(f"classify_sentiment: LLM call failed: {exc}")
+                _log("classify_sentiment: LLM returned no JSON object")
+        else:
+            _log("classify_sentiment: claude CLI returned no output (fallback)")
+    except Exception as exc:  # noqa: BLE001
+        _log(f"classify_sentiment: LLM call failed: {exc}")
 
     # Stack deterministic modifiers (always run — they catch the obvious
     # cases even if LLM said otherwise)

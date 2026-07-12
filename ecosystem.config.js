@@ -314,4 +314,41 @@ if (IS_LINUX) {
     });
 }
 
+// ============================================================================
+// sentinel — inbound merchant-sentiment scorer + auto-pause (Adon)
+// ============================================================================
+//
+// Scores each new inbound merchant reply -100..+100 (Claude Haiku via the
+// LOCAL claude CLI on the subscription OAuth — scripts/lib/claude_cli.py —
+// stacked with deterministic hostility modifiers), maintains a rolling avg,
+// and auto-pauses outbound to a merchant whose average turns hostile
+// (THRESHOLD_PAUSE). SunBiz-tenant-scoped (SUNBIZ_TENANT_ID).
+//
+// Was previously a hand-started snowflake absent from this file (audit
+// 2026-07-12): a bare `pm2 start ecosystem.config.js` would NOT bring it
+// back after a rebuild. Added here so the fleet is reproducible. Runs with
+// CEO-Agent's venv (PYTHON) + BRAVO_AGENT_ROOT so the substrate bootstrap
+// resolves. VPS-ONLY, single instance.
+if (IS_LINUX) apps.push({
+    name: "sunbiz-sentinel",
+    script: "scripts/sentinel.py",
+    args: ["loop", "--interval", "60"],
+    interpreter: PYTHON,
+    cwd: PROJECT_ROOT,
+    watch: false,
+    autorestart: true,
+    max_restarts: 20,
+    restart_delay: 15000,
+    env: {
+        PYTHONIOENCODING: "utf-8",
+        PYTHONUNBUFFERED: "1",
+        BRAVO_AGENT_ROOT: BRAVO_ROOT,
+    },
+    log_date_format: "YYYY-MM-DD HH:mm:ss",
+    error_file: "tmp/pm2-sentinel-error.log",
+    out_file: "tmp/pm2-sentinel-out.log",
+    merge_logs: true,
+    max_size: "10M",
+});
+
 module.exports = { apps };
