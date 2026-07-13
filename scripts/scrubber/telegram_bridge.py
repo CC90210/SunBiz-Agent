@@ -23,6 +23,8 @@ CLI:
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import re
 import sys
@@ -247,6 +249,43 @@ def inject_lead(sb, lead_data: dict[str, Any]) -> Optional[str]:
     return lead_id
 
 
+def promote_via_dashboard(env: dict[str, str], lead_id: Optional[str]) -> tuple[bool, Any]:
+    """HMAC-signed POST to the dashboard's internal live-subs promote endpoint.
+
+    The lead already exists (inject_lead just created it at the uw_sheet / Live
+    Subs stage). This turns it into a shoppable APPLICATION: the dashboard maps
+    the full UW-sheet field set onto the application, stamps phone_status (live
+    subs arrive with no phone), moves the lead off the Leads board, and
+    regenerates the branded application PDF — all in ONE place (Next.js), where
+    the PDF renderer lives.
+
+    Auth mirrors extraction_consumer.py: HMAC-SHA256 over the exact request body
+    with OASIS_OUTBOUND_HMAC_SECRET. Best-effort — returns (ok, detail); a
+    failure never undoes the approval (the lead still exists and the one-shot
+    backfill_live_sub_applications.py can retry it)."""
+    if not lead_id:
+        return False, "no_lead_id"
+    secret = (env.get("OASIS_OUTBOUND_HMAC_SECRET") or "").strip()
+    if not secret:
+        return False, "hmac_secret_missing"
+    base = (env.get("OASIS_DASHBOARD_URL") or env.get("PUBLIC_APP_URL") or "https://oasisai.work").rstrip("/")
+    body = json.dumps({"lead_id": lead_id}, separators=(",", ":"))
+    sig = hmac.new(secret.encode("utf-8"), body.encode("utf-8"), hashlib.sha256).hexdigest()
+    req = urllib.request.Request(
+        f"{base}/api/internal/live-subs/promote",
+        data=body.encode("utf-8"),
+        headers={"content-type": "application/json", "x-oasis-signature": sig},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=45) as r:
+            j = json.loads(r.read().decode("utf-8"))
+            return bool(j.get("ok")), j
+    except urllib.error.HTTPError as e:  # noqa: PERF203
+        return False, e.read().decode("utf-8")[:300]
+    except Exception as e:  # noqa: BLE001
+        return False, str(e)
+
+
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 
 
@@ -328,8 +367,24 @@ def handle_callback(env: dict[str, str], sb, cq: dict[str, Any]) -> None:
         ok, lead_id, m = approve_candidate(sb, cid)
         _answer(env, cqid, "✅ Approved" if ok else f"⚠ {m}")
         if ok:
-            _edit(env, chat, mid, base, "\n\n✅ *APPROVED* → injected to Live Subs")
-        print(f"[ezra-bridge] approve {cid}: ok={ok} lead={lead_id} {m}")
+            # Approve now does the full transfer: lead → shoppable application
+            # (+ regenerated PDF) via the dashboard. Best-effort; the approval
+            # already stuck, so a promote failure just leaves the lead at Live
+            # Subs for the backfill/retry to pick up — it never blocks Ezra.
+            promoted, detail = promote_via_dashboard(env, lead_id)
+            if promoted:
+                app_id = detail.get("application_id") if isinstance(detail, dict) else None
+                pstatus = detail.get("phone_status") if isinstance(detail, dict) else None
+                suffix = "\n\n✅ *APPROVED* → application created"
+                if pstatus == "needs_lookup":
+                    suffix += " · ☎ phone needed"
+                _edit(env, chat, mid, base, suffix)
+                print(f"[ezra-bridge] approve {cid}: ok=True lead={lead_id} app={app_id} phone={pstatus}")
+            else:
+                _edit(env, chat, mid, base, "\n\n✅ *APPROVED* → Live Subs (application pending — retry)")
+                print(f"[ezra-bridge] approve {cid}: ok=True lead={lead_id} promote_failed: {detail}", file=sys.stderr)
+        else:
+            print(f"[ezra-bridge] approve {cid}: ok=False {m}")
     elif action == "deny":
         ok = decline_candidate(sb, cid)
         _answer(env, cqid, "❌ Denied" if ok else "⚠ already handled")
