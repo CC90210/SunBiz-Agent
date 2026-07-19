@@ -290,6 +290,48 @@ def _credit_score(v: Any) -> Optional[int]:
     return n if 300 <= n <= 900 else None
 
 
+def _tib_start_and_months(v: Any) -> tuple[Optional[str], Optional[int]]:
+    """Resolve the sheet's 'TIB' cell into (business_start_date_iso, months).
+
+    Real Breeze sheets store TIB inconsistently: usually a business-start DATE
+    ('2024-06-01'), but also bare years ('2009'), space-mangled dates
+    ('11-18- 2024'), or fuzzy durations ('Over 10 years', '18 months'). The old
+    logic only handled a clean date via _date_iso, so ~1 in 7 live deals lost
+    time-in-business entirely (start=None, months=None) — which then let the
+    downstream oasis mapping fall back to writing the raw string into
+    business_start_date. Recover a real start date where possible; else derive
+    months alone from a duration phrase (no reliable start date). Returns
+    (None, None) when nothing usable is present."""
+    if v in (None, ""):
+        return None, None
+    import re as _re
+    raw = str(v).strip()
+    # 1) clean ISO / common date formats (existing behavior).
+    iso = _date_iso(v)
+    # 2) whitespace-mangled date, e.g. '11-18- 2024' → '11-18-2024'.
+    if not iso:
+        collapsed = _re.sub(r"\s+", "", raw)
+        if collapsed and collapsed != raw:
+            iso = _date_iso(collapsed)
+    # 3) bare 4-digit year → Jan 1 of that year (common on these sheets).
+    if not iso and _re.match(r"^(?:19|20)\d{2}$", raw):
+        iso = f"{raw}-01-01"
+    if iso:
+        return iso, _months_since(iso)
+    # 4) duration phrase → months only. Handles 'Over 10 years', '3 yrs',
+    #    '2 years 6 months', '18 months'. A bare number is NOT treated as a
+    #    duration (ambiguous years-vs-months) — leave it None rather than guess.
+    s = raw.lower()
+    ym = _re.search(r"(\d+(?:\.\d+)?)\s*\+?\s*(?:years?|yrs?|yr)\b", s)
+    mm = _re.search(r"(\d+)\s*(?:months?|mos?|mo)\b", s)
+    months: Optional[int] = None
+    if ym:
+        months = int(round(float(ym.group(1)) * 12))
+    if mm:
+        months = (months or 0) + int(mm.group(1))
+    return None, months
+
+
 def build_lead_data(parsed: dict[str, Any], result: dict[str, Any], ref: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
     """Map a parsed UW Sheet + its score into the tenant_records.data shape for
     the Command Centre lead (stage=uw_sheet). Carries the FULL merchant record —
@@ -310,10 +352,26 @@ def build_lead_data(parsed: dict[str, Any], result: dict[str, Any], ref: dict[st
     so_ssn_last4, _ = hash_ssn(parsed.get("second_owner_ssn"))
     business_state = parsed.get("state")
     business_state_code = _state_code(business_state)
-    business_start_date = _date_iso(parsed.get("tib"))
-    tib_months = _months_since(business_start_date)
+    business_start_date, tib_months = _tib_start_and_months(parsed.get("tib"))
     owner_dob = _date_iso(parsed.get("owner_dob")) or parsed.get("owner_dob")
     credit_score = _credit_score(parsed.get("credit_score"))
+
+    # Position stack payment + cadence, summed over the COUNTED funders (daily/
+    # weekly, not paid-off, not the Breeze Advance row) — the same set position_count
+    # is computed over. The oasis lender-submission template (jordan-submission.ts)
+    # renders "Existing Positions: N | ... | <Freq> Payment: $X", reading
+    # positions_payment + positions_payment_frequency off the application; without
+    # these it printed $NaN. Remaining balance is NOT on the Breeze sheet, so
+    # positions_balance stays unset (surfaced by the oasis reconciliation log).
+    counted_funders = parsed.get("counted_funders") or []
+    positions_payment = sum(
+        (p.get("payment") or 0) for p in counted_funders if isinstance(p.get("payment"), (int, float))
+    ) or None
+    _cadences = {p.get("cadence") for p in counted_funders if p.get("cadence")}
+    positions_payment_frequency = (
+        next(iter(_cadences)).capitalize() if len(_cadences) == 1
+        else "Mixed" if _cadences else None
+    )
 
     data: dict[str, Any] = {
         # ── business identity ──
@@ -375,6 +433,9 @@ def build_lead_data(parsed: dict[str, Any], result: dict[str, Any], ref: dict[st
         "true_revenue_monthly": parsed.get("true_revenue_monthly"),
         "mca_positions": parsed.get("position_count"),
         "open_mca_positions": parsed.get("position_count"),
+        "position_count": parsed.get("position_count"),
+        "positions_payment": positions_payment,
+        "positions_payment_frequency": positions_payment_frequency,
         "leverage_ratio": parsed.get("leverage_pct"),
         "previously_submitted": parsed.get("previously_submitted"),
         "iso_broker": parsed.get("iso_broker"),
