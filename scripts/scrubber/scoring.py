@@ -70,9 +70,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "uw": {
         "min_true_revenue_monthly": 80000,
         "max_active_leverage_pct": 40,
+        "min_active_positions": 2,
         "max_active_positions": 4,
         "restricted_industries": ["trucking", "accounting", "law", "transportation", "cannabis", "auto sales", "solar"],
-        "blocked_iso": ["nationwide advance"],
+        "blocked_iso": ["nationwide"],
         "funder_tiers": {"A": ["specialty capital", "altfunding", "alt funding"], "B": ["mulligan"]},
     },
 }

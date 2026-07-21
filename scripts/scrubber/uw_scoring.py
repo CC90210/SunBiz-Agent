@@ -36,6 +36,27 @@ def _has_any(text: Any, needles: list[str]) -> bool:
     return any(n in t for n in needles)
 
 
+def dolphin_eligibility_violations(parsed: dict[str, Any], cfg: dict[str, Any]) -> list[str]:
+    """Deterministic gates for every deal Dolphin may surface to Ezra."""
+    uw = cfg.get("uw", {})
+    min_pos = int(uw.get("min_active_positions", 2))
+    blocked_iso = [str(s).lower() for s in uw.get("blocked_iso", ["nationwide"])]
+    iso = parsed.get("iso_broker") or ""
+    raw_pos = parsed.get("position_count", parsed.get("mca_positions"))
+    violations: list[str] = []
+    if _has_any(iso, blocked_iso):
+        violations.append(f"blocked ISO/broker: {iso}")
+    try:
+        pos = int(raw_pos) if raw_pos is not None else None
+    except (TypeError, ValueError):
+        pos = None
+    if pos is None:
+        violations.append("active lender positions unknown")
+    elif pos < min_pos:
+        violations.append(f"active lender positions {pos} < {min_pos}")
+    return violations
+
+
 def score_uw_deal(parsed: dict[str, Any], cfg: dict[str, Any]) -> ScoreResult:
     uw = cfg.get("uw", {})
     min_rev = float(uw.get("min_true_revenue_monthly", 70000))
@@ -43,7 +64,6 @@ def score_uw_deal(parsed: dict[str, Any], cfg: dict[str, Any]) -> ScoreResult:
     max_lev = float(uw.get("max_active_leverage_pct", 40))
     max_pos = int(uw.get("max_active_positions", 4))
     restricted = [s.lower() for s in uw.get("restricted_industries", [])]
-    blocked_iso = [s.lower() for s in uw.get("blocked_iso", [])]
     tiers = uw.get("funder_tiers", {})
 
     true_rev = parsed.get("true_revenue_monthly")
@@ -81,9 +101,9 @@ def score_uw_deal(parsed: dict[str, Any], cfg: dict[str, Any]) -> ScoreResult:
         reasons.append(f"industry: {industry}")
 
     # ── ISO / broker ──
-    if _has_any(iso, blocked_iso):
-        declines.append(f"blocked ISO/broker: {iso}")
-    elif iso:
+    eligibility_declines = dolphin_eligibility_violations(parsed, cfg)
+    declines.extend(eligibility_declines)
+    if iso and not any("blocked ISO/broker" in reason for reason in eligibility_declines):
         reasons.append(f"ISO: {iso}")
 
     # ── data merge ──
