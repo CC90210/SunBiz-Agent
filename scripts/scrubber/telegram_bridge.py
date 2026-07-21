@@ -202,6 +202,16 @@ def send_deal(env: dict[str, str], cand: dict[str, Any], candidate_id: str,
               chat_id: Optional[str] = None) -> dict[str, Any]:
     """Send a deal packet to Ezra with Approve/Deny buttons. callback_data
     carries the action + candidate id for the poller to act on."""
+    # Re-run the non-negotiable gates at the final outbound boundary. This
+    # prevents stale candidates scored under older config from reaching Ezra.
+    from scrubber.scoring import load_config
+    from scrubber.uw_scoring import dolphin_eligibility_violations
+
+    data = cand.get("data") or cand.get("lead_data") or {}
+    violations = dolphin_eligibility_violations(data, load_config())
+    if violations:
+        return {"ok": False, "error": "Dolphin eligibility blocked: " + "; ".join(violations)}
+
     chat = chat_id or (env.get("EZRA_TELEGRAM_CHAT_ID") or "").strip()
     if not chat:
         return {"ok": False, "error": "EZRA_TELEGRAM_CHAT_ID not set"}
