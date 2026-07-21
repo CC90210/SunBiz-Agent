@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import time
 from collections import Counter
@@ -61,6 +62,30 @@ from import_mca_leads import (  # noqa: E402
 )
 
 from scrubber import scoring, state as st, columns as cols  # noqa: E402
+
+
+def _encrypt_ssn(raw: Optional[str]) -> Optional[str]:
+    """AES-256-GCM the full SSN for at-rest storage, or None if unavailable.
+
+    The lender application form (and the PDF the dashboard generates from it)
+    legally requires the FULL SSN, so — unlike every other PII field here — it
+    has to survive the trip. It is never written in plaintext: this returns the
+    packed `base64(iv).base64(tag).base64(ct)` blob that oasis-command-center's
+    lib/field-encryption.ts decrypts byte-for-byte (same scrypt salt/params).
+
+    Returns None when the key is absent or encryption fails — the caller then
+    stores last-4 only, exactly as before. A missing SSN degrades the
+    application; a crashed scrubber loses the whole deal."""
+    digits = re.sub(r"\D", "", str(raw or ""))
+    if len(digits) != 9:
+        return None
+    try:
+        from integrations.field_encryption import encrypt_field  # type: ignore
+
+        return encrypt_field(digits)
+    except Exception as e:  # noqa: BLE001
+        _log(f"  ssn encryption unavailable ({e}) — storing last-4 only")
+        return None
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -96,10 +121,17 @@ def _log(msg: str) -> None:
 def _load_env() -> dict[str, str]:
     try:
         from lib.secret_loader import load_env  # type: ignore
-        return load_env()
+        env = dict(load_env())
     except Exception as e:  # noqa: BLE001
         print(f"[sift] secret_loader failed, using os.environ: {e}", file=sys.stderr)
-        return dict(os.environ)
+        env = dict(os.environ)
+    # secret_loader returns a dict WITHOUT touching os.environ, but
+    # integrations.field_encryption (the SSN at-rest cipher) reads its key from
+    # os.environ. Mirror just that one key across so encryption works in-process.
+    key = env.get("BRAVO_FIELD_ENCRYPTION_KEY")
+    if key and not os.environ.get("BRAVO_FIELD_ENCRYPTION_KEY"):
+        os.environ["BRAVO_FIELD_ENCRYPTION_KEY"] = key
+    return env
 
 
 def _client(env: dict[str, str]):
@@ -350,8 +382,43 @@ def build_lead_data(parsed: dict[str, Any], result: dict[str, Any], ref: dict[st
     phone = normalize_phone(parsed.get("phone"))
     ssn_last4, ssn_hash = hash_ssn(parsed.get("ssn"))
     so_ssn_last4, _ = hash_ssn(parsed.get("second_owner_ssn"))
+    ssn_enc = _encrypt_ssn(parsed.get("ssn"))
+    so_ssn_enc = _encrypt_ssn(parsed.get("second_owner_ssn"))
     business_state = parsed.get("state")
     business_state_code = _state_code(business_state)
+
+    # ── business address reconciliation ──
+    # The sheet's business-address block is Street/City/Zip ONLY — it has no
+    # State row (the home block does). Without a state the application and its
+    # PDF carry a half address. Resolve one, in confidence order:
+    #   1. the left-block "State" cell → 2-letter code (authoritative: it drives
+    #      funder rules and TCPA timezone), else
+    #   2. the home-address state, but ONLY when the home and business street
+    #      addresses match — on this template they usually do (sole props run
+    #      the business from home), and when they differ borrowing it would be
+    #      a guess.
+    business_addr = parsed.get("business_address")
+    home_addr = parsed.get("home_address")
+    home_state = _state_code(parsed.get("home_state")) or parsed.get("home_state")
+    same_premises = bool(
+        business_addr and home_addr
+        and _re.sub(r"\W+", "", business_addr).lower() == _re.sub(r"\W+", "", home_addr).lower()
+    )
+    business_addr_state = business_state_code or (home_state if same_premises else None)
+
+    # Single-line business address for the application record. The dashboard's
+    # application schema has ONE free-text `business_address` field plus a
+    # separate 2-letter `business_state` — city and ZIP have no home of their
+    # own there and were being dropped on the floor. Concatenate them into the
+    # line so the generated application shows a complete address. State is
+    # deliberately LEFT OUT: application-pdf.composeAddress() splices
+    # business_state in before the ZIP at render time, and including it here
+    # would print it twice.
+    business_address_full = ", ".join(
+        p for p in (business_addr, parsed.get("business_city")) if p
+    ) or None
+    if business_address_full and parsed.get("business_zip"):
+        business_address_full = f"{business_address_full} {parsed['business_zip']}"
     business_start_date, tib_months = _tib_start_and_months(parsed.get("tib"))
     owner_dob = _date_iso(parsed.get("owner_dob")) or parsed.get("owner_dob")
     credit_score = _credit_score(parsed.get("credit_score"))
@@ -395,11 +462,15 @@ def build_lead_data(parsed: dict[str, Any], result: dict[str, Any], ref: dict[st
         "second_owner_name": parsed.get("second_owner_name"),
         "second_owner_ssn_last4": so_ssn_last4,
         # ── business address ──
-        "business_address": parsed.get("business_address"),
-        "business_address_line1": parsed.get("business_address"),
+        # `business_address` carries the FULL single-line address (street, city,
+        # zip) because that is the only address field the application record has;
+        # the discrete parts are kept alongside it for the lead UI and exports.
+        "business_address": business_address_full or business_addr,
+        "business_address_line1": business_addr,
         "business_city": parsed.get("business_city"),
         "business_state": business_state,
         "business_state_code": business_state_code,
+        "business_address_state": business_addr_state,
         "business_zip": parsed.get("business_zip"),
         # ── home / personal address ──
         "home_address": parsed.get("home_address"),
@@ -451,6 +522,14 @@ def build_lead_data(parsed: dict[str, Any], result: dict[str, Any], ref: dict[st
     }
     if ssn_hash:  # only when a full SSN was present to hash
         data["ssn_hash"] = ssn_hash
+    # Full SSN, AES-256-GCM at rest (see _encrypt_ssn). The lender application
+    # requires it; nothing but the dashboard's promote path (which holds
+    # BRAVO_FIELD_ENCRYPTION_KEY) can read it back, and it is never logged or
+    # rendered anywhere the lead UI can reach.
+    if ssn_enc:
+        data["owner_ssn_enc"] = ssn_enc
+    if so_ssn_enc:
+        data["second_owner_ssn_enc"] = so_ssn_enc
     tz = derive_timezone(business_state_code or business_state) if (business_state_code or business_state) else None
     if tz:
         data["timezone"] = tz

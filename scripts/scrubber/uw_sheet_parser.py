@@ -79,6 +79,51 @@ def _str(v: Any) -> Optional[str]:
     return s or None
 
 
+def _fixed_width_digits(v: Any, width: int) -> Optional[str]:
+    """Coerce a fixed-width numeric identifier (ZIP, SSN, EIN, routing) WITHOUT
+    losing leading zeros.
+
+    The UW team types these cells inconsistently — sometimes as text
+    ("047621965", "090-78-8951"), sometimes as a bare number. openpyxl returns
+    the numeric form as a float, so plain _str() renders ZIP 01201 as "1201"
+    and SSN 047621965 as "47621965". Both are silently corrupt: the ZIP lands
+    on the application/PDF one digit short and the SSN is unusable.
+
+    Rule: if the value is digits-only (after stripping separators) and SHORTER
+    than the field's canonical width, left-pad with zeros. Anything longer, or
+    carrying non-digit characters beyond the usual separators, is returned as
+    typed — we never invent or truncate digits, only restore the zeros Excel
+    dropped. ZIP+4 ("12345-6789") is preserved verbatim."""
+    s = _str(v)
+    if not s:
+        return None
+    digits = re.sub(r"[\s\-().]", "", s)
+    if not digits.isdigit():
+        return s
+    if len(digits) > width:
+        return s  # ZIP+4, or an over-long value — don't guess, hand it back
+    return digits.zfill(width)
+
+
+def _zip_code(v: Any) -> Optional[str]:
+    """A US ZIP, or None. Restores Excel-eaten leading zeros (01201) and accepts
+    ZIP+4, but REJECTS anything that isn't a plausible ZIP so mis-keyed cells
+    can't reach the application address line — seen live 2026-07-21: a sheet with
+    the EIN "47-1804593" typed into the business Zip cell."""
+    s = _fixed_width_digits(v, 5)
+    if not s:
+        return None
+    if re.fullmatch(r"\d{5}", s):
+        return s
+    # ZIP+4 only in its canonical shapes — 9 bare digits or 5-4. An EIN written
+    # the standard way ("47-1804593", 2-7) is deliberately NOT a match.
+    if re.fullmatch(r"\d{9}", s):
+        return f"{s[:5]}-{s[5:]}"
+    if re.fullmatch(r"\d{5}-\d{4}", s):
+        return s
+    return None
+
+
 def _is_yes(v: Any) -> bool:
     return _str(v) is not None and _str(v).strip().lower() in ("yes", "y", "true", "1")
 
@@ -147,7 +192,12 @@ def _parse_personal_block(ws) -> dict[str, Any]:
 
     labelB: dict[str, int] = {}
     labelB_norm: dict[str, int] = {}
-    scan_to = min(ws.max_row or 95, 95)
+    # Scan through row 112. The block runs to "FEIN #2" at row 108 on the live
+    # "UW Sheet 2.5" template (verified 2026-07-21 across 6 filled sheets); the
+    # old 95-row cap cut it off at "Fee %" (r96), so "2nd Owner Full Name" (r98),
+    # "2nd Owner SSN" (r99) and the Additional-Entity rows (r102-108) could NEVER
+    # be found — those fields were structurally always None regardless of input.
+    scan_to = min(ws.max_row or 112, 112)
     for r in range(1, scan_to + 1):
         b = ws.cell(r, 2).value
         if isinstance(b, str) and b.strip():
@@ -175,17 +225,34 @@ def _parse_personal_block(ws) -> dict[str, Any]:
         rr = r + delta
         return C(rr) if label_key(ws.cell(rr, 2).value) == label_key(expect) else None
 
+    def digits_by_label(lbl: str, width: int) -> Optional[str]:
+        r = labelB.get(lbl) or labelB_norm.get(label_key(lbl))
+        return _fixed_width_digits(ws.cell(r, 3).value, width) if r else None
+
+    def zip_offset(anchor: str, delta: int, expect: str) -> Optional[str]:
+        r = labelB.get(anchor) or labelB_norm.get(label_key(anchor))
+        if not r:
+            return None
+        rr = r + delta
+        if label_key(ws.cell(rr, 2).value) != label_key(expect):
+            return None
+        return _zip_code(ws.cell(rr, 3).value)
+
     return {
         "dba": by_label("DBA"),
-        "ein": by_label("Federal Tax ID"),
+        "ein": digits_by_label("Federal Tax ID", 9),
         "entity_type": by_label("Type a entity"),
+        # NOTE: the business-address block on this template is Street/City/Zip
+        # ONLY — there is no business "State" row (unlike the home block, which
+        # has one). The business state comes from the left-hand "State" cell and
+        # is reconciled in mca_lead_scrubber.build_lead_data.
         "business_address": by_label("Business Address"),
         "business_city": offset("Business Address", 1, "City"),
-        "business_zip": offset("Business Address", 2, "Zip"),
+        "business_zip": zip_offset("Business Address", 2, "Zip"),
         "home_address": by_label("Home Address"),
         "home_city": offset("Home Address", 1, "City"),
         "home_state": offset("Home Address", 2, "State (2 Letters ONLY)"),
-        "home_zip": offset("Home Address", 3, "Zip"),
+        "home_zip": zip_offset("Home Address", 3, "Zip"),
         "email": by_label("Email"),
         "phone": by_label("Phone"),
         "owner_first": by_label("Owner First Name"),
@@ -212,12 +279,12 @@ def _parse_personal_block(ws) -> dict[str, Any]:
             "FICO Score",
             "Credit",
         ),
-        "ssn": by_label("SSN"),
+        "ssn": digits_by_label("SSN", 9),
         "drivers_license": by_label("Driver's License"),
         "second_owner_name": by_label("2nd Owner Full Name"),
-        "second_owner_ssn": by_label("2nd Owner SSN"),
+        "second_owner_ssn": digits_by_label("2nd Owner SSN", 9),
         "bank_name": by_label("Business Bank Name"),
-        "routing_number": by_label("Routing Number"),
+        "routing_number": digits_by_label("Routing Number", 9),
         "checking_account": by_label("Checking Account"),
     }
 
