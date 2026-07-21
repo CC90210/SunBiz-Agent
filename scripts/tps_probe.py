@@ -137,13 +137,21 @@ def reachability(name: str, city: str, state: str, timeout: int = 25) -> str:
 
 # ── mode 2: live lookup through the real enricher path ──────────────────────
 
+# Three people sharing a name — the collision case. The merchant is the
+# 41-year-old in Austin; the other two must NOT be selected.
 SYNTHETIC = """
-Dana Rivera, Age 41
-Lives in Austin, TX
-Phone Numbers: (512) 555-0142 - Wireless
-Previous: 512-555-0199
+Dana Rivera, 41
+Lives in 100 Example St, Austin, TX 78701
+Phone Numbers: (512) 555-0142
 Email: dana.rivera@example.com
-Current Address: 100 Example St, Austin, TX 78701
+
+Dana Rivera, 67
+Lives in 900 Other Rd, Dallas, TX 75201
+Phone Numbers: (214) 555-0188
+
+Dana M Rivera, 29
+Lives in 55 Third Ave, Houston, TX 77002
+Phone Numbers: (713) 555-0155
 """
 
 
@@ -190,31 +198,53 @@ def lookup(data: dict[str, Any], timeout: int = 75) -> str:
         print("\n  VERDICT: CAPTCHA-BLOCKED (see --reachability).")
         return "captcha"
 
-    # Stage 3 — extraction.
-    found = E._extract_contacts(text, raw.get("final_url") or url, "truepeoplesearch", data)
-    return _report_extraction(found, text)
+    # Stage 3 — record-scoped selection.
+    found = E._select_tps_contact(text, raw.get("final_url") or url, data)
+    return _report_extraction(found or {}, text, data)
 
 
-def _report_extraction(found: dict[str, Any], text: str) -> str:
-    phone = found.get("phone")
-    email = found.get("email")
+def _report_extraction(found: dict[str, Any], text: str, data: dict[str, Any]) -> str:
+    """Narrate record-scoped matching: how many people were on the page, how
+    many shared the name, and which rule resolved (or declined) the collision."""
+    from scrubber import tps_match as T
+
+    merchant = T.merchant_from_lead(data)
+    records = T.parse_records(text)
+    print(f"  merchant filter: name={merchant['name']!r} dob={merchant['dob']!r} "
+          f"city={merchant['city']!r} state={merchant['state']!r}")
+    _mark(OK if records else WARN, "records parsed", str(len(records)))
+    for r in records[:6]:
+        print(f"      · {r.name!r} age={r.age} dob={r.dob_iso or r.dob_year} "
+              f"{r.city}/{r.state} phones={r.phones}")
+
+    outcome = found.get("phone_lookup_outcome")
+    phone, email = found.get("phone"), found.get("email")
+    _mark(OK if outcome in T.RESOLVED else WARN, "outcome",
+          f"{outcome} — {found.get('phone_lookup_reason')}")
     _mark(OK if phone else WARN, "phone",
-          f"{phone} (confidence {found.get('phone_confidence')})" if phone else "none extracted")
-    _mark(OK if email else WARN, "email",
-          f"{email} (confidence {found.get('email_confidence')})" if email else "none extracted")
+          f"{phone} (confidence {found.get('phone_confidence')})" if phone else "none selected")
+    if email:
+        _mark(OK, "email", f"{email} (confidence {found.get('email_confidence')})")
+
     all_phones = [m.group(0) for m in E.PHONE_RE.finditer(text)]
     if all_phones:
-        print(f"  all phone-shaped matches in text ({len(all_phones)}): {all_phones[:8]}")
+        print(f"  phone-shaped strings anywhere on the page ({len(all_phones)}): {all_phones[:8]}")
+        if phone and len(all_phones) > 1:
+            print("  (the OLD code returned the first of these regardless of who it belonged to)")
+
     if phone:
-        print("\n  VERDICT: NUMBER FOUND — this is the 'most probable number' case.")
+        print("\n  VERDICT: NUMBER FOUND — 'most probable number' for this merchant.")
         return "found"
-    print("\n  VERDICT: NO NUMBER — text came back but carried no usable phone.")
+    if found.get("phone_lookup_status") == "manual_review":
+        print("\n  VERDICT: NEEDS MANUAL REVIEW — candidates could not be separated.")
+        return "needs_review"
+    print("\n  VERDICT: NO NUMBER — nothing on the page matched this merchant.")
     return "not_found"
 
 
 # ── mode 3: offline parser test ─────────────────────────────────────────────
 
-def parse_only(fixture: Optional[str]) -> str:
+def parse_only(fixture: Optional[str], dob: Optional[str] = None) -> str:
     """Test extraction + confidence WITHOUT the network, so a failing live
     lookup can be blamed on the fetch rather than the regexes."""
     print("\n== PARSE-ONLY (no network) ==")
@@ -227,17 +257,21 @@ def parse_only(fixture: Optional[str]) -> str:
     data = {
         "owner_name": "Dana Rivera",
         "business_name": "Testco LLC",
+        "owner_dob": dob,
+        "owner_address_line1": "100 Example St",
         "owner_address_city": "Austin",
         "owner_address_state": "TX",
+        "owner_address_zip": "78701",
     }
-    found = E._extract_contacts(text, "https://www.truepeoplesearch.com/results", "truepeoplesearch", data)
-    verdict = _report_extraction(found, text)
+    found = E._select_tps_contact(text, "https://www.truepeoplesearch.com/results", data) or {}
+    verdict = _report_extraction(found, text, data)
     if not fixture:
         # Self-check: the synthetic fixture MUST yield a number. If it doesn't,
         # the extraction layer is broken independently of any network issue.
-        ok = found.get("phone") is not None
+        ok = found.get("phone") == "+15125550142"
         _mark(OK if ok else BAD, "self-check",
-              "extraction layer healthy" if ok else "extraction layer BROKEN on known-good input")
+              "selected the correct person of 3" if ok else
+              f"WRONG person selected ({found.get('phone')}) — expected the Austin 41-year-old")
         if not ok:
             return "parser_broken"
     return verdict
@@ -267,6 +301,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--city", default="Austin")
     ap.add_argument("--state", default="TX")
     ap.add_argument("--fixture", help="file of saved TPS page text for --parse-only")
+    ap.add_argument("--dob", help="merchant DOB (ISO) for --parse-only, to exercise the collision filter")
     ap.add_argument("--timeout", type=int, default=75)
     args = ap.parse_args(argv)
 
@@ -283,7 +318,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     verdicts: dict[str, str] = {}
     if args.parse_only or args.all:
-        verdicts["parse"] = parse_only(args.fixture)
+        verdicts["parse"] = parse_only(args.fixture, args.dob)
     if args.reachability or args.all:
         verdicts["reachability"] = reachability(
             str(data.get("owner_name") or args.name),

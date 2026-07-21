@@ -40,6 +40,7 @@ from sunbiz_constants import SUNBIZ_TENANT_ID  # noqa: E402
 from import_mca_leads import normalize_email, normalize_phone  # noqa: E402
 from mca_lead_scrubber import SHEET_OWNER, SHEET_TITLE_HINT, build_lead_data  # noqa: E402
 from scrubber import ingest, scoring, uw_scoring  # noqa: E402
+from scrubber import tps_match  # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -317,21 +318,94 @@ def _firecrawl_search(data: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _truepeople_search(data: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """Look the owner up by name + address and return the contact for THAT
+    person — or nothing.
+
+    Previously this handed the whole results page to _extract_contacts(), which
+    regexes every phone on it and keeps the first. A people-search query for a
+    common name returns many individuals, so on any multi-result page that was
+    a STRANGER's number, labelled MEDIUM because _confidence() only checks that
+    the owner name and city appear somewhere on the page — which is guaranteed,
+    since those are the query terms echoed back.
+
+    Now the page is split into per-person records and exactly one is selected
+    (scrubber.tps_match): unique name match, else disambiguated by date of
+    birth, else by address when no DOB is on file, else NO number and a
+    manual-review flag. We never guess between people — a wrong number on a
+    merchant's file is worse than an empty field.
+    """
     if not BRAVO_ROOT:
         return None
-    owner = data.get("owner_name") or data.get("contact_name") or data.get("name")
-    city = data.get("owner_address_city") or data.get("business_city") or data.get("city")
-    state = data.get("owner_address_state") or data.get("business_state_code") or data.get("state_code") or data.get("state")
+    merchant = tps_match.merchant_from_lead(data)
+    owner, city, state = merchant["name"], merchant["city"], merchant["state"]
     if not owner or not (city or state):
         return None
-    city_state = " ".join(p for p in (city, state) if p)
+    city_state = " ".join(str(p) for p in (city, state) if p)
     url = f"https://www.truepeoplesearch.com/results?name={quote_plus(str(owner))}&citystatezip={quote_plus(city_state)}"
     script = Path(BRAVO_ROOT) / "scripts" / "research_fetch.py"
     raw = _run_json([sys.executable, str(script), url, "--json", "--min-chars", "200"], timeout=75)
     if not raw.get("ok"):
         return None
     text = raw.get("text") or ""
-    return _extract_contacts(text, raw.get("final_url") or url, "truepeoplesearch", data)
+    source = raw.get("final_url") or url
+    return _select_tps_contact(text, source, data, merchant)
+
+
+def _select_tps_contact(
+    text: str,
+    source: str,
+    data: dict[str, Any],
+    merchant: Optional[dict[str, Any]] = None,
+) -> Optional[dict[str, Any]]:
+    """Record-scoped selection over a people-search page. Split out from the
+    fetch so it can be unit-tested against fixtures and exercised offline by
+    scripts/tps_probe.py --parse-only (the live fetch is captcha-blocked)."""
+    merchant = merchant or tps_match.merchant_from_lead(data)
+    records = tps_match.parse_records(text)
+    result = tps_match.select_record(records, merchant)
+    _log(
+        f"  tps: {result.outcome} ({result.reason}) "
+        f"[records={result.considered} name_matches={result.name_matched}]"
+    )
+
+    if not result.resolved or not result.phone:
+        # Surface WHY there's no number so the daemon stops reporting an opaque
+        # contact_found: 0, and so genuinely ambiguous merchants can be routed
+        # to a human (or a credentialed provider) rather than silently dropped.
+        out: dict[str, Any] = {
+            "phone_lookup_outcome": result.outcome,
+            "phone_lookup_reason": result.reason,
+            "phone_lookup_source": source,
+            "phone_lookup_checked_at": _now_iso(),
+        }
+        if result.needs_manual_review:
+            out["phone_lookup_status"] = "manual_review"
+        return out
+
+    # normalize_phone() is the house E.164 normalizer — SMS/dialers depend on it.
+    phone = normalize_phone(result.phone) or result.phone
+    email = _first_email(result.record.raw if result.record else "")
+    out = {
+        "phone": phone,
+        "phone_source": source,
+        "phone_confidence": result.confidence,
+        "phone_lookup_outcome": result.outcome,
+        "phone_lookup_reason": result.reason,
+        "phone_lookup_status": "found",
+        "phone_lookup_checked_at": _now_iso(),
+    }
+    if email:
+        out.update({"email": email, "email_source": source, "email_confidence": result.confidence})
+    return out
+
+
+def _first_email(block: str) -> Optional[str]:
+    """First usable email within ONE person's record block (not the whole page)."""
+    for m in EMAIL_RE.finditer(block or ""):
+        e = _valid_email(m.group(0))
+        if e:
+            return e
+    return None
 
 
 def _best_contact(candidates: list[dict[str, Any]], key: str) -> Optional[dict[str, Any]]:
@@ -398,6 +472,15 @@ def _enrich_contact(data: dict[str, Any], skip_web: bool = False) -> tuple[dict[
         c = _best_contact(candidates, "phone")
         if c:
             incoming.update({k: c[k] for k in ("phone", "phone_source", "phone_confidence") if c.get(k)})
+        # Carry the people-search verdict onto the lead even when NO number was
+        # usable — "3 people share this name and we have no DOB" is actionable
+        # (route to manual review / a credentialed provider), whereas a silent
+        # absence is not. Last writer wins; only one TPS candidate is produced.
+        for cand in candidates:
+            for k in ("phone_lookup_outcome", "phone_lookup_reason", "phone_lookup_status",
+                      "phone_lookup_source", "phone_lookup_checked_at"):
+                if cand.get(k):
+                    incoming[k] = cand[k]
 
     if incoming:
         incoming["enriched_at"] = _now_iso()
