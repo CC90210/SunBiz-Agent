@@ -24,8 +24,10 @@ are computed over daily/weekly funders only.
 from __future__ import annotations
 
 import re
+from datetime import date, datetime, time
 from typing import Any, Optional
 
+_MIDNIGHT = time(0, 0)
 PREFERRED_TABS = ["UW Sheet 2.5", "UW Sheet 2.0", "UW sheet 1.0"]
 _CADENCE_TO_MONTHLY = {"daily": 21.67, "weekly": 4.333}  # for any recompute need
 
@@ -75,6 +77,14 @@ def _str(v: Any) -> Optional[str]:
     # like 464874703.0 — render the integer, not the ".0" artifact.
     if isinstance(v, float) and v.is_integer():
         v = int(v)
+    # Date-formatted cells (TIB, DOB) come back as datetime. str() would render
+    # "1985-06-15 00:00:00"; emit a clean ISO date instead. Downstream parsers
+    # tolerate the timestamp form, but only by accident — a date cell should
+    # leave this module looking like a date.
+    if isinstance(v, datetime):
+        v = v.date().isoformat() if v.time() == _MIDNIGHT else v.isoformat()
+    elif isinstance(v, date):
+        v = v.isoformat()
     s = str(v).strip()
     return s or None
 
@@ -257,13 +267,25 @@ def _parse_personal_block(ws) -> dict[str, Any]:
         "phone": by_label("Phone"),
         "owner_first": by_label("Owner First Name"),
         "owner_last": by_label("Owner Last Name"),
+        # The DOB row is being ADDED to the template (operator, 2026-07-21) and
+        # is absent from every sheet in Drive as of that date — verified across
+        # 40 workbooks, all 5 tabs, all columns. These variants are matched
+        # through label_key(), which lowercases, collapses whitespace and strips
+        # a trailing colon, so "DOB:" and "Date Of Birth " also hit. Kept wide so
+        # whatever the row ends up being called is picked up without a redeploy.
         "dob": by_label_any(
             "Date of Birth",
             "DOB",
+            "D.O.B.",
             "Birth Date",
+            "Birthdate",
+            "Birthday",
             "Owner DOB",
             "Owner Date of Birth",
+            "Owner Birth Date",
             "Signer DOB",
+            "Signer Date of Birth",
+            "1st Owner DOB",
         ),
         "citizenship": by_label_any(
             "Citizenship",

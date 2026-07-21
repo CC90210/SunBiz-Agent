@@ -278,12 +278,55 @@ def _date_iso(v: Any) -> Optional[str]:
         return datetime.fromisoformat(s.replace("Z", "+00:00")).date().isoformat()
     except ValueError:
         pass
-    for fmt in ("%m/%d/%Y", "%m-%d-%Y", "%Y/%m/%d", "%B %d, %Y", "%b %d, %Y"):
+    for fmt in (
+        "%m/%d/%Y", "%m-%d-%Y", "%Y/%m/%d", "%B %d, %Y", "%b %d, %Y",
+        # 2-digit years and dot/space separators show up in hand-typed cells —
+        # notably DOB, which the UW team types far more often than it pastes.
+        "%m/%d/%y", "%m-%d-%y", "%m.%d.%Y", "%m.%d.%y", "%Y.%m.%d",
+        "%d-%b-%Y", "%d %B %Y", "%d %b %Y", "%B %d %Y", "%b %d %Y",
+    ):
         try:
             return datetime.strptime(s, fmt).date().isoformat()
         except ValueError:
             continue
     return None
+
+
+# A DOB outside this band is a mis-parse, not a birthday: 18 is the floor for a
+# personal guaranty and 100 the practical ceiling for an MCA signer. Catches the
+# common failure modes — the business start date typed into the DOB cell, a
+# 2-digit year landing in the wrong century, and Excel serial-number confusion.
+_DOB_MIN_AGE = 18
+_DOB_MAX_AGE = 100
+
+
+def _dob_iso(v: Any) -> Optional[str]:
+    """Owner date of birth → ISO YYYY-MM-DD, or None.
+
+    Unlike the generic _date_iso callers, this NEVER falls back to the raw cell
+    text. A DOB that can't be parsed and sanity-checked is dropped, because the
+    downstream renderer (oasis application-pdf.usDate) passes any non-ISO string
+    through untouched — so a raw "n/a", a phone number, or a mangled date would
+    print verbatim in the Date of Birth box on a lender-facing application. An
+    empty box is recoverable; a wrong one is not.
+
+    This is the same class of defect as the 2026-07-19 TIB fix (D5), where a
+    non-date `tib` cell was being written straight into business_start_date."""
+    iso = _date_iso(v)
+    if not iso:
+        return None
+    try:
+        born = date.fromisoformat(iso)
+    except ValueError:
+        return None
+    today = datetime.now(timezone.utc).date()
+    if born >= today:
+        return None
+    age = today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+    if not (_DOB_MIN_AGE <= age <= _DOB_MAX_AGE):
+        _log(f"  dob {iso} implies age {age} — outside {_DOB_MIN_AGE}-{_DOB_MAX_AGE}, dropping")
+        return None
+    return iso
 
 
 def _months_since(iso_date: Optional[str]) -> Optional[int]:
@@ -420,7 +463,8 @@ def build_lead_data(parsed: dict[str, Any], result: dict[str, Any], ref: dict[st
     if business_address_full and parsed.get("business_zip"):
         business_address_full = f"{business_address_full} {parsed['business_zip']}"
     business_start_date, tib_months = _tib_start_and_months(parsed.get("tib"))
-    owner_dob = _date_iso(parsed.get("owner_dob")) or parsed.get("owner_dob")
+    # Validated ISO or nothing — never the raw cell (see _dob_iso).
+    owner_dob = _dob_iso(parsed.get("owner_dob"))
     credit_score = _credit_score(parsed.get("credit_score"))
 
     # Position stack payment + cadence, summed over the COUNTED funders (daily/
