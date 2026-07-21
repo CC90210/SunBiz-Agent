@@ -141,6 +141,26 @@ def _merge_fill_only(target: dict[str, Any], incoming: dict[str, Any]) -> list[s
     return changed
 
 
+#: Lookup-state keys that must never be overwritten by a later pass.
+#: `phone_lookup_notified_at` is the once-per-lead Telegram guard — refreshing it
+#: would let the same stuck deal ping Ezra on every loop.
+_LOOKUP_STATE_STICKY = frozenset({"phone_lookup_notified_at"})
+
+
+def _refresh_lookup_state(target: dict[str, Any], incoming: dict[str, Any]) -> list[str]:
+    """Overwrite the phone_lookup_* namespace (system state), returning the keys
+    that actually changed. See the caller for why this bypasses fill-only."""
+    changed: list[str] = []
+    for key, value in incoming.items():
+        if not key.startswith("phone_lookup_") or key in _LOOKUP_STATE_STICKY:
+            continue
+        if _missing(value) or target.get(key) == value:
+            continue
+        target[key] = value
+        changed.append(key)
+    return changed
+
+
 def _file_ref(env: dict[str, str], file_id: str, fallback_name: str = "") -> dict[str, Any]:
     svc = ingest.drive_service(env)
     meta = (
@@ -342,8 +362,46 @@ def _truepeople_search(data: dict[str, Any]) -> Optional[dict[str, Any]]:
         return None
     text, source = _fetch_truepeople(merchant)
     if text is None:
-        return None
+        # The lookup could not RUN (captcha interstitial, transport error, no
+        # provider configured). That is not the same as "no number exists", and
+        # it must still produce a verdict: otherwise a deal that needs a human
+        # carries no lookup state at all, the operator queue stays empty, and
+        # the daemon is back to reporting an opaque contact_found: 0.
+        return _unavailable_verdict(merchant, source)
     return _select_tps_contact(text, source, data, merchant)
+
+
+#: Markers of an anti-automation interstitial rather than a result page. Kept in
+#: sync with scripts/tps_probe.py::CAPTCHA_MARKERS.
+_CHALLENGE_MARKERS = (
+    "captcha challenge", "px-captcha", "are you a human", "cf-challenge",
+    "just a moment", "verify you are human", "enable javascript and cookies",
+)
+
+
+#: Below this, the fetch did not retrieve a real results page. Matches the
+#: --min-chars the fetcher is asked for, which it does not itself enforce.
+_MIN_RESULT_PAGE_CHARS = 200
+
+
+def _is_challenge_page(text: str) -> bool:
+    low = (text or "").lower()
+    return any(m in low for m in _CHALLENGE_MARKERS)
+
+
+def _unavailable_verdict(merchant: dict[str, Any], source: str) -> dict[str, Any]:
+    """Route to manual review when no automated lookup could be performed."""
+    return {
+        "phone_lookup_outcome": "provider_unavailable",
+        "phone_lookup_reason": (
+            "no automated lookup available (people-search returned a captcha "
+            "challenge to this host) — trace by hand in CLEAR"
+        ),
+        "phone_lookup_status": "manual_review",
+        "phone_lookup_source": source,
+        "phone_lookup_query": _lookup_query(merchant),
+        "phone_lookup_checked_at": _now_iso(),
+    }
 
 
 def _truepeople_url(merchant: dict[str, Any]) -> str:
@@ -385,6 +443,21 @@ def _select_tps_contact(
     fetch so it can be unit-tested against fixtures and exercised offline by
     scripts/tps_probe.py --parse-only (the live fetch is captcha-blocked)."""
     merchant = merchant or tps_match.merchant_from_lead(data)
+    # An anti-automation interstitial parses to zero records, which would report
+    # as "no match found" — telling the operator nobody by that name exists when
+    # in fact the lookup never ran. Those are opposite instructions, so classify
+    # the page before parsing it.
+    if _is_challenge_page(text):
+        _log("  tps: blocked by an anti-automation challenge (not a result page)")
+        return _unavailable_verdict(merchant, source)
+    # A real results page — even one saying "no results" — is thousands of
+    # characters. Anything this short means the fetch didn't retrieve a page at
+    # all: from this host the captcha interstitial strips down to the bare
+    # string "truepeoplesearch.com" (20 chars), which would otherwise parse to
+    # zero records and be reported as "nobody by that name exists".
+    if len((text or "").strip()) < _MIN_RESULT_PAGE_CHARS:
+        _log(f"  tps: fetch returned {len((text or '').strip())} chars — not a result page")
+        return _unavailable_verdict(merchant, source)
     records = tps_match.parse_records(text)
     result = tps_match.select_record(records, merchant)
     _log(
@@ -559,12 +632,13 @@ def _enrich_contact(data: dict[str, Any], skip_web: bool = False) -> tuple[dict[
         # Carry the people-search verdict onto the lead even when NO number was
         # usable — "3 people share this name and we have no DOB" is actionable
         # (route to manual review / a credentialed provider), whereas a silent
-        # absence is not. Last writer wins; only one TPS candidate is produced.
+        # absence is not. Copy the whole phone_lookup_* namespace so a new field
+        # can't be added upstream and silently fail to reach the lead.
+        # Last writer wins; only one people-search candidate is produced.
         for cand in candidates:
-            for k in ("phone_lookup_outcome", "phone_lookup_reason", "phone_lookup_status",
-                      "phone_lookup_source", "phone_lookup_checked_at"):
-                if cand.get(k):
-                    incoming[k] = cand[k]
+            for k, v in cand.items():
+                if k.startswith("phone_lookup_") and v not in (None, "", []):
+                    incoming[k] = v
 
     if incoming:
         incoming["enriched_at"] = _now_iso()
@@ -788,6 +862,12 @@ def process_once(sb, env: dict[str, str], *, dry_run: bool, limit: int, force_re
         else:
             contact_incoming, contact_changed = _enrich_contact(data, skip_web=skip_web)
             contact_fill = _merge_fill_only(data, contact_incoming)
+            # Lookup state is SYSTEM state, not merchant data, so it refreshes
+            # rather than fills. Fill-only exists to protect operator edits (a
+            # phone someone typed must never be clobbered) — but the verdict
+            # about a lookup must be allowed to change, or a deal resolved on a
+            # later pass would keep showing the first pass's stale reason.
+            contact_fill += _refresh_lookup_state(data, contact_incoming)
             if contact_changed:
                 changed_keys.extend(contact_changed)
                 web_contact_keys = [k for k in contact_changed if k in ("email", "phone")]
