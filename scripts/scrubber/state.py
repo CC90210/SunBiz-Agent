@@ -130,22 +130,64 @@ def mark_file_processed(
 # ── row-level ─────────────────────────────────────────────────────────
 
 def row_hash(data: dict[str, Any]) -> str:
-    """Stable identity hash for a NORMALIZED lead (post map_row_to_lead_data).
+    """Stable identity hash for a NORMALIZED lead.
 
-    Uses the dedup-relevant identity fields only, so the same merchant with
-    the same sheet data yields the same hash regardless of cell formatting
-    or column order. Volatile fields (stage, score, timestamps) are excluded."""
+    DEAL IDENTITY, not snapshot identity. A Breeze UW Sheet is a LIVE working
+    document: the underwriter fills in funder rows and bank months over minutes
+    or days, and the scrubber re-reads it every tick. The hash must therefore
+    identify the DEAL, so re-reading a half-finished sheet updates the existing
+    review card instead of minting a new one.
+
+    For UW-sheet deals that identity is `source_file_id` — one sheet IS one
+    deal, and the file id is immune to in-progress edits.
+
+    Why this changed (2026-07-21): the previous identity tuple keyed on
+    `mca_positions`, which increments as funder rows are typed, so ONE deal
+    staged 4-6 times (`nexgen networks corp 720` staged 6 times from a single
+    sheet; 163 of 476 pending cards were redundant). Two of its three intended
+    stability fields — `annual_revenue` and `current_funders_text` — are dead
+    keys that the UW-sheet parser never emits (they belong to the older CSV
+    importer shape), so the effective identity had collapsed to
+    company+state+positions: entirely volatile.
+
+    Non-UW leads (the CSV importer) keep a field-based identity, with those two
+    dead keys corrected to the ones actually emitted so the fallback is stable
+    rather than accidentally position-keyed.
+    """
+    source_file_id = (data.get("source_file_id") or "").strip()
+    if source_file_id:
+        blob = json.dumps({"source_file_id": source_file_id}, sort_keys=True, ensure_ascii=False)
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
     identity = {
         "email": (data.get("email") or "").strip().lower(),
         "phone": (data.get("phone") or "").strip(),
         "company": (data.get("company") or data.get("business_name") or "").strip().lower(),
         "state": (data.get("state") or "").strip().lower(),
-        "revenue": data.get("annual_revenue"),
-        "positions": data.get("mca_positions"),
-        "funders_text": (data.get("current_funders_text") or "").strip().lower(),
+        # Revenue/funders are identity here only to separate two same-named
+        # businesses in one import; they are NOT read from the UW-sheet shape
+        # (that path returns above). Accept either schema's key.
+        "revenue": data.get("annual_revenue") or data.get("monthly_revenue"),
+        "funders_text": (
+            data.get("current_funders_text")
+            or _funders_fingerprint(data.get("current_funders"))
+        ).strip().lower(),
     }
     blob = json.dumps(identity, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _funders_fingerprint(funders: Any) -> str:
+    """Stable text for a structured funder list, so the CSV-importer identity
+    survives a schema that stores funders as dicts rather than a raw string."""
+    if not isinstance(funders, list):
+        return ""
+    names = sorted(
+        str(f.get("funder") or "").strip().lower()
+        for f in funders
+        if isinstance(f, dict) and f.get("funder")
+    )
+    return ",".join(names)
 
 
 def is_row_seen(state: dict[str, Any], h: str) -> bool:

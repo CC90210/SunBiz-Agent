@@ -613,7 +613,14 @@ def tick(sb, env: dict[str, str], cfg: dict[str, Any], state_obj: dict[str, Any]
             continue
 
         h = st.row_hash(data)
-        if st.is_row_seen(state_obj, h):
+        # The row-level ledger must NOT short-circuit a UW-sheet deal. Its hash
+        # is now stable per DEAL (source_file_id), so "seen" would be true for
+        # every later scrape and the card could never be refreshed with the
+        # underwriter's newer data. Re-processing is already gated correctly one
+        # level up, by is_file_processed() on the sheet's modifiedTime — reaching
+        # here means the sheet genuinely changed. The ledger stays authoritative
+        # for the non-UW (CSV importer) identity, which has no file to watch.
+        if not data.get("source_file_id") and st.is_row_seen(state_obj, h):
             st.mark_file_processed(state_obj, ref["id"], ref.get("modified_time"), 1, 0)
             continue
         candidate = {"data": data, "score_result": result, "row_hash": h}
@@ -624,8 +631,11 @@ def tick(sb, env: dict[str, str], cfg: dict[str, Any], state_obj: dict[str, Any]
             st.mark_file_processed(state_obj, ref["id"], ref.get("modified_time"), 1, len(push_result["inserted"]))
         st.save_state(st.strip_runtime(state_obj))
         staged_total += len(push_result["inserted"])
+        biz_label = (parsed.get("business_legal_name") or name)[:34]
         if push_result["inserted"]:
-            _log(f"  staged [{result['tier']}] {(parsed.get('business_legal_name') or name)[:34]}")
+            _log(f"  staged [{result['tier']}] {biz_label}")
+        elif push_result.get("refreshed"):
+            _log(f"  refreshed [{result['tier']}] {biz_label} (same deal, newer data)")
 
     if dry_run:
         _log(f"DRY RUN — scored {sum(tiers.values())} deal(s): {dict(tiers)} — nothing staged")

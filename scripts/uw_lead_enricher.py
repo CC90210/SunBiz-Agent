@@ -340,15 +340,39 @@ def _truepeople_search(data: dict[str, Any]) -> Optional[dict[str, Any]]:
     owner, city, state = merchant["name"], merchant["city"], merchant["state"]
     if not owner or not (city or state):
         return None
-    city_state = " ".join(str(p) for p in (city, state) if p)
-    url = f"https://www.truepeoplesearch.com/results?name={quote_plus(str(owner))}&citystatezip={quote_plus(city_state)}"
-    script = Path(BRAVO_ROOT) / "scripts" / "research_fetch.py"
-    raw = _run_json([sys.executable, str(script), url, "--json", "--min-chars", "200"], timeout=75)
-    if not raw.get("ok"):
+    text, source = _fetch_truepeople(merchant)
+    if text is None:
         return None
-    text = raw.get("text") or ""
-    source = raw.get("final_url") or url
     return _select_tps_contact(text, source, data, merchant)
+
+
+def _truepeople_url(merchant: dict[str, Any]) -> str:
+    city_state = " ".join(
+        str(merchant[k]) for k in ("city", "state") if str(merchant.get(k) or "").strip()
+    )
+    return (
+        "https://www.truepeoplesearch.com/results"
+        f"?name={quote_plus(str(merchant.get('name') or ''))}"
+        f"&citystatezip={quote_plus(city_state)}"
+    )
+
+
+def _fetch_truepeople(merchant: dict[str, Any], timeout: int = 75) -> tuple[Optional[str], str]:
+    """(page_text, source_url); text is None when the fetch failed. Split out so
+    scrubber.phone_providers can reuse the exact fetch the daemon uses."""
+    url = _truepeople_url(merchant)
+    if not BRAVO_ROOT:
+        return None, url
+    script = Path(BRAVO_ROOT) / "scripts" / "research_fetch.py"
+    raw = _run_json([sys.executable, str(script), url, "--json", "--min-chars", "200"], timeout=timeout)
+    if not raw.get("ok"):
+        return None, url
+    return (raw.get("text") or ""), (raw.get("final_url") or url)
+
+
+def _fetch_truepeople_text(merchant: dict[str, Any]) -> Optional[str]:
+    """Text-only convenience wrapper for the provider registry."""
+    return _fetch_truepeople(merchant)[0]
 
 
 def _select_tps_contact(
@@ -368,34 +392,94 @@ def _select_tps_contact(
         f"[records={result.considered} name_matches={result.name_matched}]"
     )
 
+    # Everything a human needs to finish the job by hand in CLEAR, without
+    # re-deriving it from the lead: the exact search terms we used, and the
+    # people we found but could NOT confirm.
+    base: dict[str, Any] = {
+        "phone_lookup_outcome": result.outcome,
+        "phone_lookup_reason": result.reason,
+        "phone_lookup_source": source,
+        "phone_lookup_checked_at": _now_iso(),
+        "phone_lookup_query": _lookup_query(merchant),
+    }
+    candidates = _candidate_phones(records, merchant, exclude=result.record)
+    if candidates:
+        base["phone_lookup_candidates"] = candidates
+
     if not result.resolved or not result.phone:
         # Surface WHY there's no number so the daemon stops reporting an opaque
         # contact_found: 0, and so genuinely ambiguous merchants can be routed
         # to a human (or a credentialed provider) rather than silently dropped.
-        out: dict[str, Any] = {
-            "phone_lookup_outcome": result.outcome,
-            "phone_lookup_reason": result.reason,
-            "phone_lookup_source": source,
-            "phone_lookup_checked_at": _now_iso(),
-        }
         if result.needs_manual_review:
-            out["phone_lookup_status"] = "manual_review"
-        return out
+            base["phone_lookup_status"] = "manual_review"
+        else:
+            base["phone_lookup_status"] = "not_found"
+        return base
 
     # normalize_phone() is the house E.164 normalizer — SMS/dialers depend on it.
     phone = normalize_phone(result.phone) or result.phone
     email = _first_email(result.record.raw if result.record else "")
     out = {
+        **base,
         "phone": phone,
         "phone_source": source,
         "phone_confidence": result.confidence,
-        "phone_lookup_outcome": result.outcome,
-        "phone_lookup_reason": result.reason,
         "phone_lookup_status": "found",
-        "phone_lookup_checked_at": _now_iso(),
+        "phone_lookup_matched_name": result.record.name if result.record else None,
     }
     if email:
         out.update({"email": email, "email_source": source, "email_confidence": result.confidence})
+    return {k: v for k, v in out.items() if v is not None}
+
+
+def _lookup_query(merchant: dict[str, Any]) -> str:
+    """The search terms, as a single pasteable line for CLEAR / manual lookup."""
+    name = str(merchant.get("name") or "").strip()
+    where = ", ".join(
+        str(merchant.get(k)).strip()
+        for k in ("city", "state")
+        if str(merchant.get(k) or "").strip()
+    )
+    bits = [b for b in (name, where) if b]
+    dob = str(merchant.get("dob") or "").strip()
+    if dob:
+        bits.append(f"DOB {dob}")
+    else:
+        bits.append("DOB unknown")
+    return " | ".join(bits)
+
+
+def _candidate_phones(
+    records: list[Any],
+    merchant: dict[str, Any],
+    exclude: Any = None,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """The same-name people we could NOT confirm, so an operator can eyeball them
+    instead of starting from scratch. Shaped like MCAProfilePanel's MultiPhone
+    ({number, type, ...}) so the dashboard renders them with no new component.
+
+    Only name-matching records are included — unrelated people on the page are
+    noise, and shipping them would put strangers' numbers on a merchant's file
+    for no reason."""
+    name = str(merchant.get("name") or "")
+    out: list[dict[str, Any]] = []
+    for r in records:
+        if exclude is not None and r is exclude:
+            continue
+        if not tps_match.name_matches(getattr(r, "name", ""), name):
+            continue
+        for number in (getattr(r, "phones", None) or [])[:2]:
+            out.append({
+                "number": normalize_phone(number) or number,
+                "type": "Unconfirmed",
+                "name": r.name,
+                "age": r.age,
+                "city": r.city or None,
+                "state": r.state or None,
+            })
+            if len(out) >= limit:
+                return out
     return out
 
 
@@ -600,6 +684,45 @@ def _fetch_candidate_leads(sb, limit: int) -> list[dict[str, Any]]:
     return out[:limit]
 
 
+def _notify_ezra_manual_review(env: dict[str, str], data: dict[str, Any], lead_id: str) -> bool:
+    """Tell Ezra a deal needs a hand-run phone lookup, and give him everything
+    needed to do it: the reason it couldn't be resolved automatically, the exact
+    search terms, and a deep link to the lead.
+
+    Honors the same UW_ENRICH_NOTIFY_EZRA kill switch as the enrichment notice.
+    Callers must guard on phone_lookup_notified_at — this fires on every call."""
+    if str(env.get("UW_ENRICH_NOTIFY_EZRA") or "1").strip().lower() in ("0", "false", "no"):
+        return False
+    try:
+        from scrubber import telegram_bridge as tg
+    except Exception as exc:  # noqa: BLE001
+        _log(f"telegram import failed: {exc}")
+        return False
+    chat = (env.get("EZRA_TELEGRAM_CHAT_ID") or "").strip()
+    if not chat:
+        return False
+
+    biz = data.get("business_name") or data.get("company") or "(unnamed)"
+    lines = [
+        "Phone lookup needs a human.",
+        "",
+        str(biz),
+        f"Why: {data.get('phone_lookup_reason') or 'could not be resolved automatically'}",
+    ]
+    query = data.get("phone_lookup_query")
+    if query:
+        lines.append(f"Search: {query}")
+    n_candidates = len(data.get("phone_lookup_candidates") or [])
+    if n_candidates:
+        lines.append(f"{n_candidates} unconfirmed candidate number(s) on the lead.")
+    base = (env.get("OASIS_DASHBOARD_URL") or env.get("BRAVO_DASHBOARD_URL") or "").rstrip("/")
+    if base:
+        lines.append(f"{base}/leads/{lead_id}")
+
+    res = tg.api(env, "sendMessage", {"chat_id": chat, "text": "\n".join(lines)})
+    return bool(res.get("ok"))
+
+
 def _max_notify(env: dict[str, str]) -> int:
     """Per-pass cap on Ezra verification messages so the first backfill pass over
     a backlog of contact-less leads can't flood the Dolphin chat. 0 = unlimited."""
@@ -705,6 +828,21 @@ def process_once(sb, env: dict[str, str], *, dry_run: bool, limit: int, force_re
                     stats["revived"] += _revive_missing_contact_steps(sb, lead_id, data)
                 elif web_contact_keys:
                     _log(f"revive withheld lead={lead_id}: web-sourced contact but Ezra notice not confirmed")
+            # No usable number and the candidates couldn't be separated — this
+            # deal needs a human in CLEAR. Ping ONCE per lead (the guard below),
+            # so a 5-minute loop can't turn one stuck deal into a pager storm.
+            if notify_on and data.get("phone_lookup_status") == "manual_review" \
+                    and not data.get("phone_lookup_notified_at"):
+                if _notify_ezra_manual_review(env, data, lead_id):
+                    stats["notified"] += 1
+                    data["phone_lookup_notified_at"] = _now_iso()
+                    try:
+                        sb.table("tenant_records").update({"data": data}).eq("id", lead_id).eq(
+                            "tenant_id", SUNBIZ_TENANT_ID).execute()
+                    except Exception as exc:  # noqa: BLE001
+                        # The ping went out; failing to stamp only risks a repeat.
+                        _log(f"notify stamp failed lead={lead_id}: {exc}")
+                    _log(f"notified Ezra (manual phone lookup) lead={lead_id}")
             _log(f"updated lead={lead_id} fields={preview}")
         except Exception as exc:  # noqa: BLE001
             stats["errors"] += 1

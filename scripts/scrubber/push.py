@@ -11,8 +11,17 @@ token is needed in the daemon.
 Dedup, two layers:
   1. vs existing tenant leads — skip a candidate whose merchant is already a
      lead (reuses the importer's email→phone→(company+state) keysets).
-  2. vs existing scrub_candidates — skip a row_hash already queued/decided
-     (the unique (tenant_id, row_hash) index is the DB backstop).
+  2. vs existing scrub_candidates — one card per DEAL (state.row_hash keys
+     UW-sheet deals on source_file_id; the unique (tenant_id, row_hash) index is
+     the DB backstop).
+
+REFRESH-IN-PLACE (2026-07-21). A UW Sheet is a live document the underwriter
+keeps filling in, and the daemon re-reads it every tick. A hash that is already
+queued as `pending_review` is therefore not "handled" — it is the SAME deal with
+better data, so its card is UPDATED in place (and Ezra is NOT re-notified).
+A hash that is already `approved`/`declined` is skipped: a decided deal must
+never be resurrected or silently rewritten under the reviewer.
+
 
 Only `good`/`review` tier candidates are stored; `bad` ones are counted by the
 daemon but never surfaced (keeps Ezra's queue clean).
@@ -28,23 +37,47 @@ from sunbiz_constants import SUNBIZ_TENANT_ID
 CANDIDATE_TABLE = "scrub_candidates"
 
 
-def _existing_candidate_hashes(sb, tenant_id: str) -> set[str]:
-    """row_hashes already in scrub_candidates for this tenant (any status)."""
-    out: set[str] = set()
+def _existing_candidates(sb, tenant_id: str) -> dict[str, dict[str, Any]]:
+    """row_hash -> {id, status} for this tenant's scrub_candidates.
+
+    Status matters: a `pending_review` row is refreshed in place, a decided one
+    is left alone (see the module docstring)."""
+    out: dict[str, dict[str, Any]] = {}
     try:
         r = (
             sb.table(CANDIDATE_TABLE)
-            .select("row_hash")
+            .select("id,row_hash,status")
             .eq("tenant_id", tenant_id)
             .execute()
         )
         for row in (r.data or []):
             h = row.get("row_hash")
             if h:
-                out.add(h)
+                out[h] = {"id": row.get("id"), "status": row.get("status")}
     except Exception as e:  # noqa: BLE001
         print(f"[push] existing-candidate read failed: {e}", file=sys.stderr)
     return out
+
+
+#: Fields refreshed on a re-scrape of a still-pending deal. Deliberately excludes
+#: tenant_id / row_hash / status / created_at (identity + reviewer state) and
+#: reviewed_by / reviewed_at / created_lead_id (reviewer decisions).
+_REFRESHABLE = (
+    "tier", "score", "reasons", "decline_reason", "previously_submitted",
+    "leverage_pct", "monthly_revenue", "lead_data", "source_file",
+    "source_file_id", "scoring_config_version", "scrubbed_at",
+)
+
+
+def _refresh_candidate(sb, candidate_id: str, row: dict[str, Any]) -> bool:
+    """Update a still-pending card with the newest scrape of the same deal."""
+    patch = {k: row[k] for k in _REFRESHABLE if k in row}
+    try:
+        sb.table(CANDIDATE_TABLE).update(patch).eq("id", candidate_id).execute()
+        return True
+    except Exception as e:  # noqa: BLE001
+        print(f"[push] refresh failed for {candidate_id}: {e}", file=sys.stderr)
+        return False
 
 
 def _candidate_row(tenant_id: str, ref: dict, data: dict, result: dict, h: str, cfg: dict) -> dict:
@@ -91,22 +124,33 @@ def stage_candidates(
     inserted: set[str] = set()
     skipped: set[str] = set()
     failed: set[str] = set()
+    refreshed: set[str] = set()   # still-pending cards updated in place
 
     surfaceable = [c for c in candidates if c["score_result"]["tier"] in ("good", "review")]
     if not surfaceable:
-        return {"inserted": inserted, "skipped": skipped, "failed": failed}
+        return {"inserted": inserted, "skipped": skipped, "failed": failed, "refreshed": refreshed}
 
     emails, phones, businesses = dedup_existing or (set(), set(), set())
-    existing_hashes = _existing_candidate_hashes(sb, tenant_id)
+    existing = _existing_candidates(sb, tenant_id)
 
     pending: list[tuple[str, dict]] = []  # (row_hash, row)
     for c in surfaceable:
         d = c["data"]
         r = c["score_result"]
         h = c["row_hash"]
-        # Already queued, or already a lead in the pipeline → handled (skip),
-        # NOT a failure: mark seen so we don't re-evaluate it every tick.
-        if h in existing_hashes:
+        prior = existing.get(h)
+        if prior:
+            # Same DEAL seen again. If Ezra hasn't decided it yet, this scrape is
+            # newer and more complete — refresh the card in place and do NOT
+            # re-notify. If it's already approved/declined, leave it alone.
+            if prior.get("status") == "pending_review":
+                row = _candidate_row(tenant_id, ref, d, r, h, cfg)
+                if _refresh_candidate(sb, prior["id"], row):
+                    refreshed.add(h)
+                    skipped.add(h)
+                else:
+                    failed.add(h)  # leave UNSEEN so the next tick retries
+                continue
             skipped.add(h)
             continue
         e = (d.get("email") or "").strip().lower()
@@ -119,7 +163,7 @@ def stage_candidates(
         pending.append((h, _candidate_row(tenant_id, ref, d, r, h, cfg)))
 
     if not pending:
-        return {"inserted": inserted, "skipped": skipped, "failed": failed}
+        return {"inserted": inserted, "skipped": skipped, "failed": failed, "refreshed": refreshed}
 
     # Batch insert; on any error, retry row-by-row so one bad/duplicate row
     # doesn't drop the whole batch and so we can record per-row outcomes.
@@ -140,7 +184,7 @@ def stage_candidates(
                 else:
                     failed.add(h)   # real error → leave UNSEEN so next tick retries
                     print(f"[push] insert failed for {row.get('source_file')}: {e}", file=sys.stderr)
-    return {"inserted": inserted, "skipped": skipped, "failed": failed}
+    return {"inserted": inserted, "skipped": skipped, "failed": failed, "refreshed": refreshed}
 
 
 def _notify_ezra(env: dict[str, Any], inserted_rows: list[dict]) -> None:
