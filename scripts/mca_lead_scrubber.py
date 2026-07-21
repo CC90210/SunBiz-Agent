@@ -45,7 +45,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 # Bootstrap CEO-Agent shared infra onto sys.path (secret_loader, etc.).
-from _bravo_bootstrap import bootstrap_bravo_path  # noqa: E402
+from _bravo_bootstrap import bootstrap_bravo_path, load_bravo_env  # noqa: E402
 
 BRAVO_ROOT = bootstrap_bravo_path()
 
@@ -119,19 +119,11 @@ def _log(msg: str) -> None:
 
 
 def _load_env() -> dict[str, str]:
-    try:
-        from lib.secret_loader import load_env  # type: ignore
-        env = dict(load_env())
-    except Exception as e:  # noqa: BLE001
-        print(f"[sift] secret_loader failed, using os.environ: {e}", file=sys.stderr)
-        env = dict(os.environ)
-    # secret_loader returns a dict WITHOUT touching os.environ, but
-    # integrations.field_encryption (the SSN at-rest cipher) reads its key from
-    # os.environ. Mirror just that one key across so encryption works in-process.
-    key = env.get("BRAVO_FIELD_ENCRYPTION_KEY")
-    if key and not os.environ.get("BRAVO_FIELD_ENCRYPTION_KEY"):
-        os.environ["BRAVO_FIELD_ENCRYPTION_KEY"] = key
-    return env
+    # Loaded by file path so this repo's own `scripts/lib/` package can't shadow
+    # CEO-Agent's lib.secret_loader — see _bravo_bootstrap.load_bravo_env.
+    # load_bravo_env also mirrors BRAVO_FIELD_ENCRYPTION_KEY into os.environ,
+    # which integrations.field_encryption (the SSN at-rest cipher) reads from.
+    return load_bravo_env()
 
 
 def _client(env: dict[str, str]):

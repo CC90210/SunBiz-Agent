@@ -32,7 +32,7 @@ from urllib.parse import quote_plus
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-from _bravo_bootstrap import bootstrap_bravo_path  # noqa: E402
+from _bravo_bootstrap import bootstrap_bravo_path, load_bravo_env  # noqa: E402
 
 BRAVO_ROOT = bootstrap_bravo_path()
 
@@ -82,12 +82,12 @@ def _now_iso() -> str:
 
 
 def _load_env() -> dict[str, str]:
-    try:
-        from lib.secret_loader import load_env  # type: ignore
-        return load_env()
-    except Exception as exc:  # noqa: BLE001
-        print(f"[uw-enricher] secret_loader failed, using os.environ: {exc}", file=sys.stderr)
-        return dict(os.environ)
+    """Secrets from .env.agents, loaded by file path so SunBiz-Agent's own
+    `scripts/lib/` package can't shadow CEO-Agent's lib.secret_loader — see
+    _bravo_bootstrap.load_bravo_env. The previous `from lib.secret_loader import
+    load_env` failed for exactly that reason and left this daemon depending on
+    inherited process env."""
+    return load_bravo_env()
 
 
 def _client(env: dict[str, str]):
