@@ -758,6 +758,21 @@ def _fetch_candidate_leads(sb, limit: int) -> list[dict[str, Any]]:
     return out[:limit]
 
 
+#: Outcomes that describe a STANDING CONDITION rather than a per-deal problem.
+#: `provider_unavailable` means no lookup could run at all — true of every deal
+#: until a provider is credentialed, so paging it would fire on all of them and
+#: say the same thing each time. That belongs on the dashboard queue, which
+#: lists every deal needing a phone regardless of why. Telegram is reserved for
+#: work only a human can resolve: a lookup that RAN and couldn't decide.
+_NO_PING_OUTCOMES = frozenset({"provider_unavailable"})
+
+
+def _should_ping_manual_review(data: dict[str, Any]) -> bool:
+    if data.get("phone_lookup_status") != "manual_review":
+        return False
+    return str(data.get("phone_lookup_outcome") or "") not in _NO_PING_OUTCOMES
+
+
 def _notify_ezra_manual_review(env: dict[str, str], data: dict[str, Any], lead_id: str) -> bool:
     """Tell Ezra a deal needs a hand-run phone lookup, and give him everything
     needed to do it: the reason it couldn't be resolved automatically, the exact
@@ -911,7 +926,7 @@ def process_once(sb, env: dict[str, str], *, dry_run: bool, limit: int, force_re
             # No usable number and the candidates couldn't be separated — this
             # deal needs a human in CLEAR. Ping ONCE per lead (the guard below),
             # so a 5-minute loop can't turn one stuck deal into a pager storm.
-            if notify_on and data.get("phone_lookup_status") == "manual_review" \
+            if notify_on and _should_ping_manual_review(data) \
                     and not data.get("phone_lookup_notified_at"):
                 if _notify_ezra_manual_review(env, data, lead_id):
                     stats["notified"] += 1
