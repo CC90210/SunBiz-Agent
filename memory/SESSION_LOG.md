@@ -1,12 +1,30 @@
 ---
 name: SESSION_LOG
 description: Append-only session history for SunBiz-Agent. Add new sessions at the top.
-last_updated: 2026-07-02
+last_updated: 2026-07-22
 ---
 
 # SESSION LOG
 
 > Append-only. New sessions at the top. Each entry: date, duration estimate, actions, decisions, next session.
+
+---
+
+## 2026-07-22 - Dolphin Ezra selection protocol + VPS system message
+
+**Actions:**
+- Expanded the Dolphin UW eligibility gate with Texas/Utah/Virginia restrictions, the previously-submitted exception to the 2-position minimum, a 5-position maximum, Column I monthly leverage under 40%, and known payoff amounts of at least $15,000 while allowing blanks.
+- Added Ezra's preferred-funder force-surface list with Nationwide retained as the absolute veto; the final Telegram boundary re-runs the same deterministic gate.
+- Parsed Date Funded and Payoff Amount from the UW position table and added both numbers to Ezra's complete Telegram funder-stack packet.
+- Rewrote `docs/DOLPHIN_VPS_PRODUCTION_UPDATE_2026-07-21.md` as the paste-ready VPS system message and deployment/verification protocol.
+
+**Proof:**
+- `python -m pytest tests/test_dolphin_eligibility.py tests/test_uw_enrichment_mapping.py -q` passed: 12 tests.
+- `python -m compileall -q scripts/scrubber` passed.
+- `git diff --check` passed. Local `scripts/doctor.py --json` still reports the known Windows-only missing local `.env.agents`/Gmail/HMAC configuration; production verification remains explicitly gated in the VPS system message.
+
+**Open Items:**
+- Commit/push these changes, then paste the system message into the VPS agent to fast-forward, re-evaluate stale pending candidates, restart only Dolphin's two PM2 workers, and prove production health without sending a test deal.
 
 ---
 

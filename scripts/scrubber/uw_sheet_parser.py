@@ -338,6 +338,8 @@ def _parse_positions(ws, idx: dict) -> list[dict[str, Any]]:
     weekly_col = idx.get("Weekly", (hdr_row, funder_col + 2))[1]
     monthly_col = idx.get("Monthly", (hdr_row, funder_col + 3))[1]
     lev_col = idx.get("Leverage Per Funder", (hdr_row, funder_col + 4))[1]
+    date_funded_col = idx.get("Date Funded", (hdr_row, lev_col + 1))[1]
+    payoff_col = idx.get("Payoff Amount", (hdr_row, lev_col + 2))[1]
     total_row = idx.get("Total", (None, None))[0]
 
     # trailing columns (Date Funded / Payoff Amount / Assumed End Date / Notes)
@@ -376,6 +378,8 @@ def _parse_positions(ws, idx: dict) -> list[dict[str, Any]]:
                 "cadence": cadence,
                 "payment": payment,
                 "leverage_pct": lev,
+                "date_funded": _str(ws.cell(r, date_funded_col).value),
+                "payoff_amount": _num(ws.cell(r, payoff_col).value),
                 "paid_off": paid_off,
                 "is_breeze_advance": bool(funder and "breeze advance" in funder.lower()),
             })
@@ -502,6 +506,7 @@ def parse_uw_sheet(workbook) -> dict[str, Any]:
         "sheet_monthly_leverage": monthly_lev_avg,  # the sheet's own avg (incl. monthly funders)
         "positions": positions,
         "counted_funders": counted,                 # daily/weekly only
-        "position_count": position_count,           # daily/weekly count (the 2-4 rule)
-        "leverage_pct": leverage_pct,               # sum of daily/weekly funder leverage (the <40% rule)
+        "position_count": position_count,           # daily/weekly active count
+        "leverage_pct": monthly_lev_avg,             # sheet's Column I monthly-leverage average
+        "active_funder_leverage_pct": leverage_pct,  # diagnostic daily/weekly sum
     }

@@ -7,10 +7,8 @@ shape so the candidate/push path is unchanged.
 CC's rules (2026-06-30; validated against Eagle Metal + Metrocity):
   HARD DECLINES → tier 'bad' (any one):
     - True Revenue (avg monthly) < min_true_revenue_monthly  (default $80k)
-    - active leverage % >= max_active_leverage_pct           (default 40%)
-      where active leverage = sum of daily/weekly funders' per-funder leverage,
-      EXCLUDING paid-off positions and the Breeze Advance new-advance row.
-    - > max_active_positions active funders AND not under the leverage cap
+    - UW Sheet Column I monthly leverage >= max_active_leverage_pct (default 40%)
+    - > max_active_positions active funders (default 5)
     - industry in restricted list
     - ISO/broker in blocked list (Nationwide Advance)
     - data merge notes present and != "Clean" (a report/flag)
@@ -40,20 +38,47 @@ def dolphin_eligibility_violations(parsed: dict[str, Any], cfg: dict[str, Any]) 
     """Deterministic gates for every deal Dolphin may surface to Ezra."""
     uw = cfg.get("uw", {})
     min_pos = int(uw.get("min_active_positions", 2))
+    max_pos = int(uw.get("max_active_positions", 5))
+    max_lev = float(uw.get("max_active_leverage_pct", 40))
+    min_payoff = float(uw.get("min_payoff_amount", 15000))
     blocked_iso = [str(s).lower() for s in uw.get("blocked_iso", ["nationwide"])]
+    restricted_states = [str(s).lower() for s in uw.get("restricted_states", [])]
+    preferred_names = [str(s).lower() for s in uw.get("preferred_funders", [])]
     iso = parsed.get("iso_broker") or ""
     raw_pos = parsed.get("position_count", parsed.get("mca_positions"))
+    positions = parsed.get("positions") or parsed.get("uw_all_positions") or parsed.get("counted_funders") or []
     violations: list[str] = []
     if _has_any(iso, blocked_iso):
         violations.append(f"blocked ISO/broker: {iso}")
+        return violations
+    # Preferred funders force the deal through every ordinary selection rule.
+    # Nationwide is the sole absolute veto in Ezra's protocol.
+    if any(_has_any(p.get("funder"), preferred_names) for p in positions):
+        return []
+    state = str(parsed.get("state") or "").strip().lower()
+    if state and state in restricted_states:
+        violations.append(f"restricted state: {parsed.get('state')}")
     try:
         pos = int(raw_pos) if raw_pos is not None else None
     except (TypeError, ValueError):
         pos = None
-    if pos is None:
+    if pos is None and not parsed.get("previously_submitted"):
         violations.append("active lender positions unknown")
-    elif pos < min_pos:
+    elif pos is not None and pos < min_pos and not parsed.get("previously_submitted"):
         violations.append(f"active lender positions {pos} < {min_pos}")
+    elif pos is not None and pos > max_pos:
+        violations.append(f"active lender positions {pos} > {max_pos}")
+    lev = parsed.get("sheet_monthly_leverage")
+    if lev is None:
+        lev = parsed.get("leverage_pct")
+    if lev is not None and float(lev) >= max_lev:
+        violations.append(f"monthly leverage {lev}% >= {int(max_lev)}%")
+    for p in positions:
+        payoff = p.get("payoff_amount")
+        if payoff is not None and float(payoff) < min_payoff:
+            violations.append(
+                f"{p.get('funder') or 'funder'} payoff amount ${float(payoff):,.0f} < ${min_payoff:,.0f}"
+            )
     return violations
 
 
@@ -62,12 +87,13 @@ def score_uw_deal(parsed: dict[str, Any], cfg: dict[str, Any]) -> ScoreResult:
     min_rev = float(uw.get("min_true_revenue_monthly", 70000))
     industry_floors = {str(k).lower(): float(v) for k, v in (uw.get("industry_min_revenue") or {}).items()}
     max_lev = float(uw.get("max_active_leverage_pct", 40))
-    max_pos = int(uw.get("max_active_positions", 4))
     restricted = [s.lower() for s in uw.get("restricted_industries", [])]
     tiers = uw.get("funder_tiers", {})
 
     true_rev = parsed.get("true_revenue_monthly")
-    lev = parsed.get("leverage_pct")
+    lev = parsed.get("sheet_monthly_leverage")
+    if lev is None:
+        lev = parsed.get("leverage_pct")
     pos = parsed.get("position_count")
     industry = parsed.get("industry")
     iso = parsed.get("iso_broker") or ""
@@ -114,20 +140,16 @@ def score_uw_deal(parsed: dict[str, Any], cfg: dict[str, Any]) -> ScoreResult:
     else:
         declines.append(f"data merge flagged: {dm}")
 
-    # ── leverage (active daily/weekly funders) ──
+    # ── leverage (UW Sheet Column I monthly average) ──
     if lev is None:
         unknowns.append("active leverage unknown")
     elif lev >= max_lev:
-        declines.append(f"active leverage {lev}% >= {int(max_lev)}%")
+        pass  # centralized in dolphin_eligibility_violations()
     else:
-        reasons.append(f"active leverage {lev}% on {pos} active funder(s)")
+        reasons.append(f"monthly leverage {lev}% on {pos} active funder(s)")
 
-    # ── position count (>max allowed ONLY if under the leverage cap) ──
-    if pos is not None and pos > max_pos:
-        if lev is not None and lev < max_lev:
-            reasons.append(f"{pos} active funders but under {int(max_lev)}% (exception)")
-        else:
-            declines.append(f">{max_pos} active funders and not under {int(max_lev)}%")
+    # ── position count ──
+    # Position min/max gates are centralized in dolphin_eligibility_violations().
 
     # ── funder tier note (A-tier presence is a positive signal) ──
     a_names = [s.lower() for s in tiers.get("A", [])]

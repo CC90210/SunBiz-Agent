@@ -162,6 +162,11 @@ def _funder_lines(d: dict[str, Any]) -> list[str]:
             bits.append(f"{lev}%")
         if cad:
             bits.append(cad)
+        if p.get("date_funded"):
+            bits.append(f"funded {_md(p['date_funded'])}")
+        payoff = _money(p.get("payoff_amount"))
+        if payoff:
+            bits.append(f"payoff {payoff}")
         meta = (" — " + " ".join(bits)) if bits else ""
         suffix = f"  _({tag})_" if tag else ""
         lines.append(f"  {marker} {_md(p.get('funder'))}{meta}{suffix}")

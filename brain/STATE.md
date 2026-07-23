@@ -24,10 +24,10 @@ tags: [state, ephemeral]
 | Dimension | Level | Notes |
 |-----------|-------|-------|
 | **Version** | V6.x Cognitive Substrate | Upgraded 2026-05-25 — Solara persona established |
-| **Position** | OPERATIONAL | Shop-out pipeline active; Breeze UW scrubber/Telegram bridge verified live; UW enrichment worker code-complete + dry-run verified 2026-07-02 |
-| **Confidence** | 0.86 | Live Drive auth, VPS bridge heartbeat, fresh scrub_candidates, Telegram approval history, and UW enrichment dry-runs verified |
-| **Focus Area** | Deal throughput + renewal pipeline | Start `uw-lead-enricher` on the VPS after controlled first live batch |
-| **Memory Health** | ACTIVE | Session log refreshed with 2026-07-02 live verification |
+| **Position** | READY FOR VPS DEPLOY | Dolphin's expanded Ezra selection protocol is implemented and locally verified; production workers are not yet updated |
+| **Confidence** | 0.90 | 12 focused tests pass; parser/scorer/Telegram boundary and packet rendering are covered |
+| **Focus Area** | Dolphin production rollout | Commit/push, then execute `docs/DOLPHIN_VPS_PRODUCTION_UPDATE_2026-07-21.md` on the VPS without sending a test deal |
+| **Memory Health** | ACTIVE | Session log refreshed with 2026-07-22 Dolphin protocol work |
 
 ---
 

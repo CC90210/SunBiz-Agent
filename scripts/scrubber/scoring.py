@@ -71,9 +71,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "min_true_revenue_monthly": 80000,
         "max_active_leverage_pct": 40,
         "min_active_positions": 2,
-        "max_active_positions": 4,
+        "max_active_positions": 5,
+        "min_payoff_amount": 15000,
+        "restricted_states": ["texas", "tx", "utah", "ut", "virginia", "va"],
         "restricted_industries": ["trucking", "accounting", "law", "transportation", "cannabis", "auto sales", "solar"],
         "blocked_iso": ["nationwide"],
+        "preferred_funders": [
+            "dlp", "cfg", "cfg ms", "fdm", "forward financing", "square advance",
+            "overton funding", "flow capital", "can capital", "capitas", "legend",
+            "mca servicing",
+        ],
         "funder_tiers": {"A": ["specialty capital", "altfunding", "alt funding"], "B": ["mulligan"]},
     },
 }

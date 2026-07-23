@@ -17,7 +17,7 @@
 #       only when claude.enabled is true (it is FALSE in v1).
 # ════════════════════════════════════════════════════════════════════════
 
-version: "0.4-dolphin-two-position-nationwide-block"
+version: "0.5-dolphin-ezra-selection-protocol"
 
 # Is the sheet "Revenue" column MONTHLY or ANNUAL revenue?  ⚠️ MUST be
 # confirmed by the SOP. Analysis of the live sheets (values ~$36k-$3.2M with
@@ -103,9 +103,11 @@ uw:
   # floor above. Add entries here if CC later wants a stricter floor for a
   # specific industry, e.g. {construction: 80000}.
   industry_min_revenue: {}
-  max_active_leverage_pct: 40       # cap on active daily/weekly-funder leverage
-  min_active_positions: 2           # unknown/0/1-position deals are never surfaced
-  max_active_positions: 4           # >4 active funders OK ONLY if under the cap
+  max_active_leverage_pct: 40       # Column I monthly average must be strictly below
+  min_active_positions: 2           # exception: previously submitted deals
+  max_active_positions: 5           # 6+ active funders are not surfaced
+  min_payoff_amount: 15000          # known values below this block; blanks are allowed
+  restricted_states: [texas, tx, utah, ut, virginia, va]
   restricted_industries:            # any of these → hard decline
     - trucking
     - accounting
@@ -116,6 +118,19 @@ uw:
     - solar
   blocked_iso:                      # ISO/broker shops we never work
     - nationwide                     # Nationwide, Nationwide Advance, and variants
+  preferred_funders:                # force-surface when present; Nationwide still vetoes
+    - dlp
+    - cfg
+    - cfg ms
+    - fdm
+    - forward financing
+    - square advance
+    - overton funding
+    - flow capital
+    - can capital
+    - capitas
+    - legend
+    - mca servicing
   funder_tiers:                     # for the funder-research / matching layer
     A: ["specialty capital", "altfunding", "alt funding"]
     B: ["mulligan"]
