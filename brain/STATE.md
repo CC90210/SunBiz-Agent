@@ -24,10 +24,10 @@ tags: [state, ephemeral]
 | Dimension | Level | Notes |
 |-----------|-------|-------|
 | **Version** | V6.x Cognitive Substrate | Upgraded 2026-05-25 — Solara persona established |
-| **Position** | READY FOR VPS DEPLOY | Dolphin's expanded Ezra selection protocol is implemented and locally verified; production workers are not yet updated |
-| **Confidence** | 0.90 | 12 focused tests pass; parser/scorer/Telegram boundary and packet rendering are covered |
-| **Focus Area** | Dolphin production rollout | Commit/push, then execute `docs/DOLPHIN_VPS_PRODUCTION_UPDATE_2026-07-21.md` on the VPS without sending a test deal |
-| **Memory Health** | ACTIVE | Session log refreshed with 2026-07-22 Dolphin protocol work |
+| **Position** | READY FOR VPS DEPLOY | Dolphin's month-level underwriting and two-account limit are implemented and locally verified; production workers are not yet updated |
+| **Confidence** | 0.95 | 23 focused tests pass; parser, side-by-side/per-account monthly gates, malformed-table handling, stale-candidate boundary, and Telegram rendering are covered |
+| **Focus Area** | Dolphin production rollout | Push the commit, then execute `docs/DOLPHIN_VPS_PRODUCTION_UPDATE_2026-07-21.md` on the VPS without sending a test deal |
+| **Memory Health** | ACTIVE | Session log refreshed with 2026-07-29 Dolphin monthly-UW work |
 
 ---
 
@@ -88,11 +88,11 @@ tags: [state, ephemeral]
 
 ## Last Heartbeat
 
-- **Date:** 2026-07-02
-- **Agent:** BRAVO/Codex live verification from Windows, using SunBiz CLI tools
-- **Result:** Breeze UW extraction path verified: Drive discovery OK, VPS bridge heartbeat fresh, recent UW candidates staged, Telegram approval path has approved/declined history.
+- **Date:** 2026-07-29
+- **Agent:** Codex backend implementation from Windows
+- **Result:** Month-level Dolphin parser/scoring changes passed 23 focused tests; VPS deployment remains queued through the paste-ready system message.
 
-*Last updated: 2026-07-02*
+*Last updated: 2026-07-29*
 
 ## Obsidian Links
 - [[brain/SOUL]] | [[brain/USER]] | [[brain/AGENTS]] | [[brain/CAPABILITIES]]

@@ -25,6 +25,18 @@ Required behavior after deployment (Ezra's Dolphin protocol; evaluate in this or
 7. Telegram packets must show the complete funder stack plus each available leverage, cadence, Date Funded, and Payoff Amount so Ezra can audit the decision from his phone.
 8. The final Telegram boundary must independently re-run these rules so stale candidates scored under an older config cannot leak through.
 9. Ezra remains the human gate: Dolphin presents qualifying deals with Approve/Deny buttons and never approves its own deal.
+10. Parse every monthly row in every UW revenue table. Apply the existing
+    industry revenue floor and strict-below-40% leverage rule to each month,
+    not only the Average row. A weak latest month cannot be hidden by prior
+    stronger months.
+11. Treat each repeated UW revenue table as one business bank account. One or
+    two accounts follow the normal evaluation path; more than two is a hard
+    block, including when a preferred funder is present.
+12. Telegram packets must show the UW account count and each parsed month's
+    true revenue and leverage so Ezra can audit every average from his phone.
+13. Fail closed when monthly UW tables are missing or unreadable. Candidates
+    created under the old average-only parser must not leak through the final
+    Telegram boundary; they require re-parsing from the source workbook.
 
 Deployment protocol:
 
@@ -35,7 +47,14 @@ Deployment protocol:
    - `/srv/sunbiz/ceo-agent/.venv/bin/python -m compileall -q scripts/scrubber`
 4. In `/srv/sunbiz/ceo-agent`, run:
    - `/srv/sunbiz/ceo-agent/.venv/bin/python -m pytest scripts/tests/test_send_gateway.py -q`
-5. Prove the gate locally without Telegram/network effects using the full `tests/test_dolphin_eligibility.py` matrix: Nationwide variants, previous-submission exception, 2-to-5 position range, restricted states, 39.99/40.00 leverage boundary, known/blank payoff behavior, every preferred-funder override, and Telegram number rendering.
+5. Prove the gate locally without Telegram/network effects using the full
+   `tests/test_dolphin_eligibility.py` matrix: Nationwide variants,
+   previous-submission exception, 2-to-5 position range, restricted states,
+   39.99/40.00 leverage boundary, known/blank payoff behavior, every
+   preferred-funder override, the 500k/500k/40k deterioration case, a 60%
+   latest-month leverage failure behind a 25% average, the acceptable
+   400k/600k/300k range, one/two/three account behavior, and Telegram monthly
+   number rendering.
 6. Inspect pending `scrub_candidates` before restart. Re-evaluate every `pending_review` row with the current `dolphin_eligibility_violations()` gate. Do not delete rows. Mark newly ineligible rows declined/blocked through the existing candidate-status path and record candidate IDs plus reasons. If that safe path is unclear, stop and report the IDs.
 7. Restart only `mca-lead-scrubber` and `ezra-telegram-bridge` with updated environment, then `pm2 save`. Do not restart unrelated PM2 services.
 8. Verify both workers are online, have stable restart counts, and show no traceback/auth/config errors in the last 100 log lines. Confirm a normal scrub heartbeat/tick. Do not create or send a test deal to Ezra.

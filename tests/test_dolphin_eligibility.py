@@ -23,6 +23,10 @@ def _deal(**overrides):
         "data_merge_notes": "Clean",
         "previously_submitted": True,
         "state": "Florida",
+        "uw_account_count": 1,
+        "monthly_underwriting": [
+            {"account_number": 1, "month": "June", "true_revenue": 100_000, "leverage_pct": 10},
+        ],
         "counted_funders": [
             {"funder": "Generic Capital", "payoff_amount": 20_000},
             {"funder": "Another Funder", "payoff_amount": None},
@@ -125,3 +129,164 @@ def test_telegram_packet_shows_funder_date_and_payoff_numbers() -> None:
     packet = format_packet({"lead_data": deal, "tier": "good", "score": 90})
     assert "funded 2026-06-01" in packet
     assert "payoff $20,000" in packet
+
+
+def test_dolphin_rejects_bad_month_hidden_by_good_average() -> None:
+    cfg = load_config()
+    result = score_uw_deal(_deal(
+        true_revenue_monthly=346_667,
+        sheet_monthly_leverage=25,
+        uw_account_count=1,
+        monthly_underwriting=[
+            {"account_number": 1, "month": "April", "true_revenue": 500_000, "leverage_pct": 10},
+            {"account_number": 1, "month": "May", "true_revenue": 500_000, "leverage_pct": 12},
+            {"account_number": 1, "month": "June", "true_revenue": 40_000, "leverage_pct": 60},
+        ],
+    ), cfg)
+    assert result["tier"] == "bad"
+    assert "June true revenue $40,000" in result["decline_reason"]
+    assert "June leverage 60%" in result["decline_reason"]
+
+
+def test_dolphin_allows_workable_monthly_range_and_max_two_accounts() -> None:
+    cfg = load_config()
+    rows = [
+        {"account_number": 1, "month": "April", "true_revenue": 400_000, "leverage_pct": 20},
+        {"account_number": 1, "month": "May", "true_revenue": 600_000, "leverage_pct": 15},
+        {"account_number": 1, "month": "June", "true_revenue": 300_000, "leverage_pct": 30},
+        {"account_number": 2, "month": "June", "true_revenue": 100_000, "leverage_pct": 10},
+    ]
+    result = score_uw_deal(_deal(uw_account_count=2, monthly_underwriting=rows), cfg)
+    assert result["tier"] == "good"
+    assert any("monthly UW:" in reason for reason in result["reasons"])
+
+
+def test_dolphin_rejects_more_than_two_uw_accounts_even_with_preferred_funder() -> None:
+    cfg = load_config()
+    result = score_uw_deal(_deal(
+        uw_account_count=3,
+        counted_funders=[{"funder": "DLP", "payoff_amount": 20_000}],
+    ), cfg)
+    assert result["tier"] == "bad"
+    assert "business bank accounts 3 > 2" in result["decline_reason"]
+
+
+def test_dolphin_blocks_stale_candidate_without_monthly_uw_evidence() -> None:
+    cfg = load_config()
+    result = score_uw_deal(_deal(uw_account_count=None, monthly_underwriting=[]), cfg)
+    assert result["tier"] == "bad"
+    assert "monthly revenue tables missing or unreadable" in result["decline_reason"]
+
+
+def test_dolphin_requires_monthly_evidence_for_every_counted_account() -> None:
+    cfg = load_config()
+    result = score_uw_deal(_deal(uw_account_count=2), cfg)
+    assert result["tier"] == "bad"
+    assert "readable for 1 of 2 account(s)" in result["decline_reason"]
+
+
+def test_dolphin_requires_both_revenue_and_leverage_for_every_month() -> None:
+    cfg = load_config()
+    result = score_uw_deal(_deal(monthly_underwriting=[
+        {"account_number": 1, "month": "June", "true_revenue": 100_000, "leverage_pct": None},
+    ]), cfg)
+    assert result["tier"] == "bad"
+    assert "June missing or unreadable leverage" in result["decline_reason"]
+
+
+def test_parser_reads_every_month_and_counts_repeated_uw_tables() -> None:
+    import openpyxl
+    from scrubber.uw_sheet_parser import parse_uw_sheet
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    for start, values in ((10, (500_000, 500_000, 40_000)), (20, (100_000, 120_000, 110_000))):
+        ws.cell(start, 2, "Month")
+        ws.cell(start, 3, "True Revenue")
+        ws.cell(start, 4, "Monthly Leverage")
+        for offset, (month, revenue) in enumerate(zip(("April", "May", "June"), values), 1):
+            ws.cell(start + offset, 2, month)
+            ws.cell(start + offset, 3, revenue)
+            ws.cell(start + offset, 4, (10 + offset) / 100)
+        ws.cell(start + 4, 2, "Average")
+        ws.cell(start + 4, 3, sum(values) / 3)
+        ws.cell(start + 4, 4, 0.12)
+
+    parsed = parse_uw_sheet(wb)
+    assert parsed["uw_account_count"] == 2
+    assert len(parsed["monthly_underwriting"]) == 6
+    assert parsed["monthly_underwriting"][2] == {
+        "month": "June", "true_revenue": 40_000.0,
+        "leverage_pct": 13.0, "account_number": 1,
+    }
+
+
+def test_telegram_packet_shows_monthly_underwriting_context() -> None:
+    deal = _deal(
+        uw_account_count=1,
+        monthly_underwriting=[
+            {"account_number": 1, "month": "June", "true_revenue": 300_000, "leverage_pct": 30},
+        ],
+    )
+    packet = format_packet({"lead_data": deal, "tier": "good", "score": 90})
+    assert "UW accounts: 1" in packet
+    assert "A1 June: $300,000 · 30% lev" in packet
+
+
+def test_parser_pairs_side_by_side_account_columns() -> None:
+    import openpyxl
+    from scrubber.uw_sheet_parser import parse_uw_sheet
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    for col, revenue, leverage in ((1, 100_000, 0.10), (5, 200_000, 0.20)):
+        ws.cell(10, col, "Month")
+        ws.cell(10, col + 1, "True Revenue")
+        ws.cell(10, col + 2, "Monthly Leverage")
+        ws.cell(11, col, "June")
+        ws.cell(11, col + 1, revenue)
+        ws.cell(11, col + 2, leverage)
+        ws.cell(12, col, "Average")
+        ws.cell(12, col + 1, revenue)
+        ws.cell(12, col + 2, leverage)
+
+    rows = parse_uw_sheet(wb)["monthly_underwriting"]
+    assert rows == [
+        {"month": "June", "true_revenue": 100_000.0, "leverage_pct": 10.0, "account_number": 1},
+        {"month": "June", "true_revenue": 200_000.0, "leverage_pct": 20.0, "account_number": 2},
+    ]
+
+
+def test_parser_preserves_fully_unreadable_labeled_month() -> None:
+    import openpyxl
+    from scrubber.uw_sheet_parser import parse_uw_sheet
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Month", "True Revenue", "Monthly Leverage"])
+    ws.append(["June", "#VALUE!", "#DIV/0!"])
+    ws.append(["Average", 100_000, 0.20])
+
+    parsed = parse_uw_sheet(wb)
+    assert parsed["monthly_underwriting"] == [{
+        "month": "June", "true_revenue": None,
+        "leverage_pct": None, "account_number": 1,
+    }]
+
+
+def test_parser_counts_table_with_missing_leverage_header() -> None:
+    import openpyxl
+    from scrubber.uw_sheet_parser import parse_uw_sheet
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Month", "True Revenue", "Monthly Leverage", "", "Month", "True Revenue"])
+    ws.append(["June", 100_000, 0.10, "", "June", 200_000])
+    ws.append(["Average", 100_000, 0.10, "", "Average", 200_000])
+
+    parsed = parse_uw_sheet(wb)
+    assert parsed["uw_account_count"] == 2
+    assert parsed["uw_revenue_tables"][1]["parse_error"] == "Monthly Leverage header missing or unreadable"
+    result = score_uw_deal({**_deal(), **parsed}, load_config())
+    assert result["tier"] == "bad"
+    assert "readable for 1 of 2 account(s)" in result["decline_reason"]

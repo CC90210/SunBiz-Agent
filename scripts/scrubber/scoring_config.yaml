@@ -17,7 +17,7 @@
 #       only when claude.enabled is true (it is FALSE in v1).
 # ════════════════════════════════════════════════════════════════════════
 
-version: "0.5-dolphin-ezra-selection-protocol"
+version: "0.6-dolphin-monthly-underwriting-protocol"
 
 # Is the sheet "Revenue" column MONTHLY or ANNUAL revenue?  ⚠️ MUST be
 # confirmed by the SOP. Analysis of the live sheets (values ~$36k-$3.2M with

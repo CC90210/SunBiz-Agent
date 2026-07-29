@@ -51,10 +51,59 @@ def dolphin_eligibility_violations(parsed: dict[str, Any], cfg: dict[str, Any]) 
     if _has_any(iso, blocked_iso):
         violations.append(f"blocked ISO/broker: {iso}")
         return violations
+    account_count = parsed.get("uw_account_count")
+    monthly_rows = parsed.get("monthly_underwriting") or []
+    if account_count is None or int(account_count) < 1 or not monthly_rows:
+        violations.append("UW monthly revenue tables missing or unreadable")
+    else:
+        account_count = int(account_count)
+        readable_accounts = {
+            int(row["account_number"])
+            for row in monthly_rows
+            if row.get("account_number") is not None
+        }
+        if len(readable_accounts) != account_count:
+            violations.append(
+                f"monthly UW evidence readable for {len(readable_accounts)} of {account_count} account(s)"
+            )
+        if account_count > 2:
+            violations.append(f"business bank accounts {account_count} > 2")
+    monthly_min_rev = float(uw.get("min_true_revenue_monthly", 70000))
+    industry_floors = {
+        str(k).lower(): float(v)
+        for k, v in (uw.get("industry_min_revenue") or {}).items()
+    }
+    industry = parsed.get("industry")
+    for ind_key, floor in industry_floors.items():
+        if _has_any(industry, [ind_key]):
+            monthly_min_rev = floor
+            break
+    for month in monthly_rows:
+        label = month.get("month") or "unknown month"
+        account = month.get("account_number") or "?"
+        revenue = month.get("true_revenue")
+        month_lev = month.get("leverage_pct")
+        if revenue is None or month_lev is None:
+            missing = []
+            if revenue is None:
+                missing.append("true revenue")
+            if month_lev is None:
+                missing.append("leverage")
+            violations.append(
+                f"account {account} {label} missing or unreadable " + " and ".join(missing)
+            )
+        if revenue is not None and float(revenue) < monthly_min_rev:
+            violations.append(
+                f"account {account} {label} true revenue ${float(revenue):,.0f} < ${monthly_min_rev:,.0f}"
+            )
+        if month_lev is not None and float(month_lev) >= max_lev:
+            violations.append(
+                f"account {account} {label} leverage {float(month_lev):g}% >= {int(max_lev)}%"
+            )
     # Preferred funders force the deal through every ordinary selection rule.
-    # Nationwide is the sole absolute veto in Ezra's protocol.
+    # Nationwide plus Ezra's per-month/account safety rules are absolute.
     if any(_has_any(p.get("funder"), preferred_names) for p in positions):
-        return []
+        return violations
     state = str(parsed.get("state") or "").strip().lower()
     if state and state in restricted_states:
         violations.append(f"restricted state: {parsed.get('state')}")
@@ -100,6 +149,7 @@ def score_uw_deal(parsed: dict[str, Any], cfg: dict[str, Any]) -> ScoreResult:
     dm = (parsed.get("data_merge_notes") or "").strip()
     prev = bool(parsed.get("previously_submitted"))
     counted = parsed.get("counted_funders") or []
+    monthly_rows = parsed.get("monthly_underwriting") or []
 
     reasons: list[str] = []
     declines: list[str] = []
@@ -119,6 +169,18 @@ def score_uw_deal(parsed: dict[str, Any], cfg: dict[str, Any]) -> ScoreResult:
         declines.append(f"true revenue ${int(true_rev):,}/mo < ${int(eff_min_rev):,}{tag}")
     else:
         reasons.append(f"true revenue ${int(true_rev):,}/mo")
+    if monthly_rows:
+        monthly_context = ", ".join(
+            f"A{row.get('account_number', '?')} {row.get('month', '?')}: "
+            f"${float(row['true_revenue']):,.0f}"
+            + (
+                f" / {float(row['leverage_pct']):g}% lev"
+                if row.get("leverage_pct") is not None else ""
+            )
+            for row in monthly_rows
+            if row.get("true_revenue") is not None
+        )
+        reasons.append(f"monthly UW: {monthly_context}")
 
     # ── industry (often blank — only declines when present + restricted) ──
     if _has_any(industry, restricted):

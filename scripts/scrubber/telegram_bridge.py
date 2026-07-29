@@ -192,6 +192,17 @@ def format_packet(cand: dict[str, Any]) -> str:
         lines.append(f"💰 True revenue: {tr}/mo")
     if d.get("leverage_ratio") is not None:
         lines.append(f"📊 Active leverage: {d['leverage_ratio']}% · {d.get('mca_positions', '?')} active funder(s)")
+    monthly = d.get("monthly_underwriting") or []
+    if monthly:
+        lines.append(f"🏦 UW accounts: {d.get('uw_account_count', '?')}")
+        for row in monthly:
+            revenue = _money(row.get("true_revenue")) or "unknown"
+            leverage = row.get("leverage_pct")
+            lev_text = f" · {leverage:g}% lev" if isinstance(leverage, (int, float)) else ""
+            lines.append(
+                f"  A{row.get('account_number', '?')} {row.get('month', '?')}: "
+                f"{revenue}{lev_text}"
+            )
     # Full funder stack — Ezra needs EVERY position (active, paid-off, monthly),
     # not just the one counted toward leverage. (uw_all_positions carries them.)
     lines.extend(_funder_lines(d))

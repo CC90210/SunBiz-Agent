@@ -10,6 +10,25 @@ last_updated: 2026-07-22
 
 ---
 
+## 2026-07-29 - Dolphin month-level underwriting hardening
+
+**Actions:**
+- Replaced Dolphin's average-only UW decision input with parsing of every monthly True Revenue and Monthly Leverage row across every repeated UW table/account.
+- Applied the existing SunBiz revenue floor and strict-below-40% leverage cap to each month; missing monthly evidence now fails closed, and more than two UW tables/accounts is blocked even when a preferred funder is present.
+- Added monthly account/revenue/leverage evidence to Ezra's Telegram review packet and updated the paste-ready VPS deployment system message.
+
+**Proof:**
+- `python -m pytest tests/test_dolphin_eligibility.py tests/test_uw_enrichment_mapping.py -q` passed: 23 tests.
+- `python -m py_compile ...` and `python -m compileall -q scripts/scrubber` passed.
+- `git diff --check` passed.
+- Local legacy `python scripts/doctor.py --json` remains red only because this Windows clone intentionally has no local `.env.agents`; production proof is gated in the VPS deployment message.
+
+**Open Items:**
+- Push the commit, then use `docs/DOLPHIN_VPS_PRODUCTION_UPDATE_2026-07-21.md` with the VPS-terminal agent to fast-forward, re-parse stale candidates, restart only Dolphin's two PM2 workers, and capture PM2/log proof.
+- Independent audit findings fixed: every detected account is counted even when malformed, every labeled month is preserved and must contain both revenue and leverage, and side-by-side tables are paired to their own columns.
+
+---
+
 ## 2026-07-22 - Dolphin Ezra selection protocol + VPS system message
 
 **Actions:**

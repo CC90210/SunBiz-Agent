@@ -389,6 +389,75 @@ def _parse_positions(ws, idx: dict) -> list[dict[str, Any]]:
 
 # ── main ─────────────────────────────────────────────────────────────────
 
+def _parse_revenue_tables(ws) -> list[dict[str, Any]]:
+    """Parse every monthly row from every UW revenue table.
+
+    Each repeated ``True Revenue`` header represents one business bank account.
+    Pair columns by labels on the same header row so template coordinate drift
+    does not hide a table.
+    """
+    tables: list[dict[str, Any]] = []
+    for hdr_row, revenue_col in _find_all(ws, "True Revenue"):
+        same_row_revenue_cols = sorted(
+            col for row, col in _find_all(ws, "True Revenue") if row == hdr_row
+        )
+        next_revenue_col = next(
+            (col for col in same_row_revenue_cols if col > revenue_col),
+            (ws.max_column or 30) + 1,
+        )
+        leverage_candidates = []
+        month_candidates = []
+        for col in range(1, min(ws.max_column or 30, 30) + 1):
+            value = ws.cell(hdr_row, col).value
+            if isinstance(value, str) and value.strip() == "Monthly Leverage":
+                if revenue_col < col < next_revenue_col:
+                    leverage_candidates.append(col)
+            if isinstance(value, str) and value.strip().lower() == "month":
+                if col < revenue_col:
+                    month_candidates.append(col)
+        if not leverage_candidates:
+            tables.append({
+                "account_number": len(tables) + 1,
+                "monthly_rows": [],
+                "average_true_revenue": None,
+                "average_leverage_pct": None,
+                "parse_error": "Monthly Leverage header missing or unreadable",
+            })
+            continue
+        leverage_col = min(leverage_candidates)
+        previous_revenue_col = max(
+            (col for col in same_row_revenue_cols if col < revenue_col),
+            default=0,
+        )
+        month_col = max(
+            (col for col in month_candidates if col > previous_revenue_col),
+            default=revenue_col - 1,
+        )
+
+        rows: list[dict[str, Any]] = []
+        average_revenue = average_leverage = None
+        for row in range(hdr_row + 1, min(ws.max_row or hdr_row + 18, hdr_row + 18) + 1):
+            label = _str(ws.cell(row, month_col).value)
+            revenue = _num(ws.cell(row, revenue_col).value)
+            leverage = _pct(ws.cell(row, leverage_col).value)
+            if label and label.strip().lower() == "average":
+                average_revenue, average_leverage = revenue, leverage
+                break
+            if label or revenue is not None or leverage is not None:
+                rows.append({
+                    "month": label or f"row {row}",
+                    "true_revenue": revenue,
+                    "leverage_pct": leverage,
+                })
+        tables.append({
+            "account_number": len(tables) + 1,
+            "monthly_rows": rows,
+            "average_true_revenue": average_revenue,
+            "average_leverage_pct": average_leverage,
+        })
+    return tables
+
+
 def parse_uw_sheet(workbook) -> dict[str, Any]:
     """Parse one UW Sheet workbook → canonical deal dict."""
     ws, tab = pick_tab(workbook)
@@ -428,6 +497,12 @@ def parse_uw_sheet(workbook) -> dict[str, Any]:
         true_rev_avg = _num(ws.cell(avg_row, idx["True Revenue"][1]).value)
         if "Monthly Leverage" in idx:
             monthly_lev_avg = _pct(ws.cell(avg_row, idx["Monthly Leverage"][1]).value)
+    revenue_tables = _parse_revenue_tables(ws)
+    monthly_rows = [
+        {**row, "account_number": table["account_number"]}
+        for table in revenue_tables
+        for row in table["monthly_rows"]
+    ]
 
     # contact / entity / PII — the Jotform block (col B label → col C value).
     pers = _parse_personal_block(ws)
@@ -504,6 +579,9 @@ def parse_uw_sheet(workbook) -> dict[str, Any]:
         "checking_account": pers.get("checking_account"),
         "true_revenue_monthly": true_rev_avg,      # avg monthly True Revenue (col H)
         "sheet_monthly_leverage": monthly_lev_avg,  # the sheet's own avg (incl. monthly funders)
+        "uw_revenue_tables": revenue_tables,
+        "uw_account_count": len(revenue_tables),
+        "monthly_underwriting": monthly_rows,
         "positions": positions,
         "counted_funders": counted,                 # daily/weekly only
         "position_count": position_count,           # daily/weekly active count
