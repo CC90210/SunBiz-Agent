@@ -10,6 +10,23 @@ last_updated: 2026-07-22
 
 ---
 
+## 2026-07-29 - Dolphin monthly underwriting deployed to VPS
+
+**Actions:**
+- VPS `srv1723601` fast-forwarded SunBiz-Agent to `a4ac8e8796f23adbd97c642cd00ab70557137906`.
+- Restarted only `mca-lead-scrubber` and `ezra-telegram-bridge`; both stayed online through a full polling interval and PM2 state was saved.
+- Reconciled 395 legacy `pending_review` candidates through the existing decline path because they lacked the newly required monthly UW evidence; reasons and reviewer marker were persisted and no rows were deleted.
+
+**Proof:**
+- VPS: Dolphin/UW tests `23 passed in 0.42s`; send-gateway tests `92 passed in 1.74s`; scrubber compileall passed.
+- VPS logs: authenticated Telegram polling, fresh scrub claim at `2026-07-29T21:46:44Z`, no startup traceback, and zero remaining `pending_review`.
+- Local cross-check: `origin/main` resolves to `a4ac8e8`; focused tests passed again, `23 passed in 0.92s`.
+
+**Open Items:**
+- None. Monitor normal production deals; no additional deployment system message is required.
+
+---
+
 ## 2026-07-29 - Dolphin month-level underwriting hardening
 
 **Actions:**

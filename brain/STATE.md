@@ -24,10 +24,10 @@ tags: [state, ephemeral]
 | Dimension | Level | Notes |
 |-----------|-------|-------|
 | **Version** | V6.x Cognitive Substrate | Upgraded 2026-05-25 — Solara persona established |
-| **Position** | READY FOR VPS DEPLOY | Dolphin's month-level underwriting and two-account limit are implemented and locally verified; production workers are not yet updated |
-| **Confidence** | 0.95 | 23 focused tests pass; parser, side-by-side/per-account monthly gates, malformed-table handling, stale-candidate boundary, and Telegram rendering are covered |
-| **Focus Area** | Dolphin production rollout | Push the commit, then execute `docs/DOLPHIN_VPS_PRODUCTION_UPDATE_2026-07-21.md` on the VPS without sending a test deal |
-| **Memory Health** | ACTIVE | Session log refreshed with 2026-07-29 Dolphin monthly-UW work |
+| **Position** | LIVE / VERIFIED | Dolphin month-level underwriting and two-account limit are deployed on VPS `srv1723601` at `a4ac8e8` |
+| **Confidence** | 0.98 | VPS tests passed (23 Dolphin/UW + 92 send-gateway), both PM2 workers stayed stable through a full poll, and logs were clean |
+| **Focus Area** | Normal production monitoring | No deployment action pending; observe the next real UW deal without sending a synthetic test |
+| **Memory Health** | ACTIVE | Session log refreshed with 2026-07-29 VPS deployment proof |
 
 ---
 
@@ -89,8 +89,8 @@ tags: [state, ephemeral]
 ## Last Heartbeat
 
 - **Date:** 2026-07-29
-- **Agent:** Codex backend implementation from Windows
-- **Result:** Month-level Dolphin parser/scoring changes passed 23 focused tests; VPS deployment remains queued through the paste-ready system message.
+- **Agent:** VPS deployment agent + Codex cross-check
+- **Result:** Commit `a4ac8e8` is live; Dolphin and Telegram workers are stable, 115 VPS tests passed, and stale pending candidates were safely reconciled.
 
 *Last updated: 2026-07-29*
 
