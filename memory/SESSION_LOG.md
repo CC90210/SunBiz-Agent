@@ -22,7 +22,8 @@ last_updated: 2026-07-30
 - Dashboard full SunBiz test suite passed; TypeScript, focused mapping tests, and targeted lint passed.
 - SunBiz focused suite: `25 passed`.
 - Independent Codex audit: no actionable defects.
-- Production publishing and VPS execution remain the final deployment steps.
+- Dashboard commits `b96caa0` + `096ba7c` and SunBiz commits `731a2e9` + `79d69d6` were pushed to `main`.
+- Vercel production deployment `dpl_5QUHXsUKxks39jbvBcmwy2dzkPPD` reached `Ready`; VPS execution remains the final step.
 
 ---
 

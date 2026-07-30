@@ -24,9 +24,9 @@ tags: [state, ephemeral]
 | Dimension | Level | Notes |
 |-----------|-------|-------|
 | **Version** | V6.x Cognitive Substrate | Upgraded 2026-05-25 — Solara persona established |
-| **Position** | FIX VERIFIED / DEPLOYMENT PENDING | Dolphin CRM lifecycle fix is committed locally; dashboard production push and VPS repair remain |
+| **Position** | DASHBOARD LIVE / VPS REPAIR PENDING | Corrected CRM lifecycle is live in Vercel production; VPS must pull SunBiz main and run the gated repair |
 | **Confidence** | 0.98 | Full dashboard SunBiz suite, typecheck/mapping/lint, 25 SunBiz tests, and independent audit passed |
-| **Focus Area** | Deploy CRM visibility repair | Publish dashboard + SunBiz commits, then run the fingerprint-gated VPS repair without a synthetic deal |
+| **Focus Area** | Complete VPS repair | Run the fingerprint-gated VPS handoff without a synthetic deal, then verify repaired lead/application markers |
 | **Memory Health** | ACTIVE | Session log refreshed with 2026-07-30 root-cause and deployment handoff |
 
 ---
@@ -90,7 +90,7 @@ tags: [state, ephemeral]
 
 - **Date:** 2026-07-30
 - **Agent:** Codex implementation + independent Codex review
-- **Result:** CRM visibility root cause fixed and verified locally; production/VPS rollout pending.
+- **Result:** Dashboard production is Ready and both repos are pushed; targeted VPS repair remains.
 
 *Last updated: 2026-07-30*
 
