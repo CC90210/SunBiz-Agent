@@ -275,7 +275,12 @@ def inject_lead(sb, lead_data: dict[str, Any]) -> Optional[str]:
     return lead_id
 
 
-def promote_via_dashboard(env: dict[str, str], lead_id: Optional[str]) -> tuple[bool, Any]:
+def promote_via_dashboard(
+    env: dict[str, str],
+    lead_id: Optional[str],
+    *,
+    restore_live_subs: bool = False,
+) -> tuple[bool, Any]:
     """HMAC-signed POST to the dashboard's internal live-subs promote endpoint.
 
     The lead already exists (inject_lead just created it at the uw_sheet / Live
@@ -295,7 +300,10 @@ def promote_via_dashboard(env: dict[str, str], lead_id: Optional[str]) -> tuple[
     if not secret:
         return False, "hmac_secret_missing"
     base = (env.get("OASIS_DASHBOARD_URL") or env.get("PUBLIC_APP_URL") or "https://oasisai.work").rstrip("/")
-    body = json.dumps({"lead_id": lead_id}, separators=(",", ":"))
+    payload: dict[str, Any] = {"lead_id": lead_id}
+    if restore_live_subs:
+        payload["restore_live_subs"] = True
+    body = json.dumps(payload, separators=(",", ":"))
     sig = hmac.new(secret.encode("utf-8"), body.encode("utf-8"), hashlib.sha256).hexdigest()
     req = urllib.request.Request(
         f"{base}/api/internal/live-subs/promote",
