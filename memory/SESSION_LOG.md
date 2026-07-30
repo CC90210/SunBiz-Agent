@@ -1,12 +1,28 @@
 ---
 name: SESSION_LOG
 description: Append-only session history for SunBiz-Agent. Add new sessions at the top.
-last_updated: 2026-07-22
+last_updated: 2026-07-30
 ---
 
 # SESSION LOG
 
 > Append-only. New sessions at the top. Each entry: date, duration estimate, actions, decisions, next session.
+
+---
+
+## 2026-07-30 - Dolphin approval-to-CRM lifecycle repair
+
+**Actions:**
+- Traced Telegram approval through the signed dashboard promote endpoint and live Supabase records.
+- Confirmed approved candidates already carried their full payload into linked lead/application records; visibility failed because the automatic path stamped both lifecycle transfer markers.
+- Changed new and deduplicated-unadvanced approvals to remain in Leads -> Live Subs with a linked application, and added a fingerprint-gated repair for only the July auto-transfer incident.
+- Added a VPS handoff that dry-runs, repairs, verifies zero remaining candidates, and restarts only the Telegram bridge.
+
+**Proof:**
+- Dashboard full SunBiz test suite passed; TypeScript, focused mapping tests, and targeted lint passed.
+- SunBiz focused suite: `25 passed`.
+- Independent Codex audit: no actionable defects.
+- Production publishing and VPS execution remain the final deployment steps.
 
 ---
 

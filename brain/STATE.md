@@ -24,10 +24,10 @@ tags: [state, ephemeral]
 | Dimension | Level | Notes |
 |-----------|-------|-------|
 | **Version** | V6.x Cognitive Substrate | Upgraded 2026-05-25 — Solara persona established |
-| **Position** | LIVE / VERIFIED | Dolphin month-level underwriting and two-account limit are deployed on VPS `srv1723601` at `a4ac8e8` |
-| **Confidence** | 0.98 | VPS tests passed (23 Dolphin/UW + 92 send-gateway), both PM2 workers stayed stable through a full poll, and logs were clean |
-| **Focus Area** | Normal production monitoring | No deployment action pending; observe the next real UW deal without sending a synthetic test |
-| **Memory Health** | ACTIVE | Session log refreshed with 2026-07-29 VPS deployment proof |
+| **Position** | FIX VERIFIED / DEPLOYMENT PENDING | Dolphin CRM lifecycle fix is committed locally; dashboard production push and VPS repair remain |
+| **Confidence** | 0.98 | Full dashboard SunBiz suite, typecheck/mapping/lint, 25 SunBiz tests, and independent audit passed |
+| **Focus Area** | Deploy CRM visibility repair | Publish dashboard + SunBiz commits, then run the fingerprint-gated VPS repair without a synthetic deal |
+| **Memory Health** | ACTIVE | Session log refreshed with 2026-07-30 root-cause and deployment handoff |
 
 ---
 
@@ -88,11 +88,11 @@ tags: [state, ephemeral]
 
 ## Last Heartbeat
 
-- **Date:** 2026-07-29
-- **Agent:** VPS deployment agent + Codex cross-check
-- **Result:** Commit `a4ac8e8` is live; Dolphin and Telegram workers are stable, 115 VPS tests passed, and stale pending candidates were safely reconciled.
+- **Date:** 2026-07-30
+- **Agent:** Codex implementation + independent Codex review
+- **Result:** CRM visibility root cause fixed and verified locally; production/VPS rollout pending.
 
-*Last updated: 2026-07-29*
+*Last updated: 2026-07-30*
 
 ## Obsidian Links
 - [[brain/SOUL]] | [[brain/USER]] | [[brain/AGENTS]] | [[brain/CAPABILITIES]]

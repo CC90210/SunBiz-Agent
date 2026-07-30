@@ -1,7 +1,7 @@
 ---
 name: MISTAKES
 description: Failure log with root cause and prevention for every SunBiz-Agent error. Append-only. New entries at top.
-last_updated: 2026-05-25
+last_updated: 2026-07-30
 ---
 
 # MISTAKES — Error Log & Root Cause Analysis
@@ -12,6 +12,11 @@ last_updated: 2026-05-25
 > If the prevention is regex-detectable, add to `memory/ANTI_PATTERNS.json` so the hook flags future occurrences.
 
 ---
+
+### 2026-07-30 — Declared Dolphin healthy without verifying the CRM destination
+- **Failure:** Telegram approvals succeeded and workers/tests were green, but approved deals disappeared from Live Subs because the dashboard promotion path immediately marked them transferred.
+- **Root cause:** Verification stopped at transport, database creation, and daemon health. It did not assert the actual lifecycle board filters (`lead.transferred_at` and `application.promoted_at`) or check the card in its required CRM section.
+- **Prevention:** Every approval deployment must verify the full user-visible lifecycle: candidate approved, full lead payload linked, lead remains in `uw_sheet` with `transferred_at=null`, linked application exists with `promoted_at=null`, and an explicit later transfer moves the pair exactly once.
 
 ### 2026-07-12 — Verified a daemon "fixed" from a shell whose env didn't match the daemon's
 - **Failure:** Ported sentinel + classifier LLM calls to `from lib.claude_cli import run_claude_cli` and "proved" it with `classify_sentiment` returning `source=llm`. An independent review then showed the import raises `ModuleNotFoundError` in the REAL pm2 daemon — the LLM path was silently falling back to deterministic scoring the whole time.
