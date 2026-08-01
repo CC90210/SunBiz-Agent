@@ -187,10 +187,24 @@ def stage_candidates(
     return {"inserted": inserted, "skipped": skipped, "failed": failed, "refreshed": refreshed}
 
 
+def _telegram_notifications_enabled(env: dict[str, Any]) -> bool:
+    """Fail closed: deal-card pushes require an explicit operator opt-in."""
+    value = str(env.get("EZRA_TELEGRAM_NOTIFICATIONS_ENABLED") or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 def _notify_ezra(env: dict[str, Any], inserted_rows: list[dict]) -> None:
-    """Send each newly-staged candidate to Ezra's Telegram for approval. No-op
-    if EZRA_TELEGRAM_CHAT_ID isn't set (dashboard-only mode)."""
-    if not (env.get("EZRA_TELEGRAM_CHAT_ID") or "").strip() or not inserted_rows:
+    """Optionally send newly-staged candidates to Ezra for approval.
+
+    Ingestion and dashboard staging are independent from Telegram delivery.
+    Notifications default OFF so a backlog, parser change, or Drive replay
+    cannot turn into an unbounded message storm.
+    """
+    if (
+        not _telegram_notifications_enabled(env)
+        or not (env.get("EZRA_TELEGRAM_CHAT_ID") or "").strip()
+        or not inserted_rows
+    ):
         return
     try:
         from scrubber import telegram_bridge as TB
