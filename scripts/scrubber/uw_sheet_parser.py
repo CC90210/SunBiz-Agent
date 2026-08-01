@@ -389,35 +389,84 @@ def _parse_positions(ws, idx: dict) -> list[dict[str, Any]]:
 
 # ── main ─────────────────────────────────────────────────────────────────
 
-def _parse_revenue_tables(ws) -> list[dict[str, Any]]:
-    """Parse every monthly row from every UW revenue table.
+#: Column-A marker that opens a per-bank revenue section ("Notes Bank 2: #5722").
+_BANK_SECTION_RE = re.compile(r"^\s*notes bank\s*\d*", re.I)
 
-    Each repeated ``True Revenue`` header represents one business bank account.
-    Pair columns by labels on the same header row so template coordinate drift
-    does not hide a table.
+
+def _month_label_col(ws, hdr_row: int, revenue_col: int, previous_revenue_col: int) -> int:
+    """Column holding the month labels for the table headed at `hdr_row`.
+
+    The Breeze template heads that column "Revenue" (the month list runs down
+    it); simpler layouts head it "Month". Trust an explicit header over the
+    positional guess: falling back to `revenue_col - 1` on the real template
+    lands on "Non Revenue (transfers, return checks etc)", which is how every
+    deal came back with month labels like "Non Revenue" and "row 47".
     """
+    month_cols: list[int] = []
+    label_cols: list[int] = []
+    for col in range(previous_revenue_col + 1, revenue_col):
+        value = ws.cell(hdr_row, col).value
+        if not isinstance(value, str):
+            continue
+        text = value.strip().lower()
+        if text == "month":
+            month_cols.append(col)
+        elif text == "revenue":
+            label_cols.append(col)
+    if month_cols:
+        return max(month_cols)
+    if label_cols:
+        return max(label_cols)
+    return revenue_col - 1
+
+
+def _parse_revenue_tables(ws) -> list[dict[str, Any]]:
+    """Parse every monthly row from each UW revenue table.
+
+    The Breeze template repeats the ``True Revenue`` header once per business
+    bank account — the first block, then one per "Notes Bank N:" section — and
+    once more, UNLABELED, for the consolidated roll-up at the bottom. That
+    roll-up restates the banks rather than adding one, so it is parsed but
+    flagged `is_total` and kept out of the account count; counting it made every
+    deal report one bank too many and trip the "bank accounts > 2" gate.
+
+    Layouts with no "Notes Bank" markers at all keep the old behaviour: every
+    table is its own account.
+    """
+    headers = sorted(_find_all(ws, "True Revenue"))
+    header_rows = sorted({row for row, _col in headers})
+    bank_marked = {
+        row for row in header_rows
+        if _BANK_SECTION_RE.match(_str(ws.cell(row, 1).value) or "")
+    }
+    first_header_row = header_rows[0] if header_rows else None
+
     tables: list[dict[str, Any]] = []
-    for hdr_row, revenue_col in _find_all(ws, "True Revenue"):
-        same_row_revenue_cols = sorted(
-            col for row, col in _find_all(ws, "True Revenue") if row == hdr_row
-        )
+    account_number = 0
+    for hdr_row, revenue_col in headers:
+        # The roll-up is any block that carries no bank marker and is not the
+        # sheet's first table — only meaningful once markers exist at all.
+        is_total = bool(bank_marked) and hdr_row not in bank_marked and hdr_row != first_header_row
+        if is_total:
+            acct: Optional[int] = None
+        else:
+            account_number += 1
+            acct = account_number
+
+        same_row_revenue_cols = sorted(col for row, col in headers if row == hdr_row)
         next_revenue_col = next(
             (col for col in same_row_revenue_cols if col > revenue_col),
             (ws.max_column or 30) + 1,
         )
-        leverage_candidates = []
-        month_candidates = []
-        for col in range(1, min(ws.max_column or 30, 30) + 1):
-            value = ws.cell(hdr_row, col).value
-            if isinstance(value, str) and value.strip() == "Monthly Leverage":
-                if revenue_col < col < next_revenue_col:
-                    leverage_candidates.append(col)
-            if isinstance(value, str) and value.strip().lower() == "month":
-                if col < revenue_col:
-                    month_candidates.append(col)
+        leverage_candidates = [
+            col for col in range(revenue_col + 1, min(next_revenue_col, (ws.max_column or 30) + 1))
+            if isinstance(ws.cell(hdr_row, col).value, str)
+            and ws.cell(hdr_row, col).value.strip() == "Monthly Leverage"
+        ]
         if not leverage_candidates:
             tables.append({
-                "account_number": len(tables) + 1,
+                "account_number": acct,
+                "is_total": is_total,
                 "monthly_rows": [],
                 "average_true_revenue": None,
                 "average_leverage_pct": None,
@@ -429,28 +478,42 @@ def _parse_revenue_tables(ws) -> list[dict[str, Any]]:
             (col for col in same_row_revenue_cols if col < revenue_col),
             default=0,
         )
-        month_col = max(
-            (col for col in month_candidates if col > previous_revenue_col),
-            default=revenue_col - 1,
+        month_col = _month_label_col(ws, hdr_row, revenue_col, previous_revenue_col)
+
+        # Never read past the next table's header — the block below the last one
+        # is the positions grid, which is what produced "row 47".."row 53".
+        next_header_row = next((row for row in header_rows if row > hdr_row), None)
+        last_row = min(
+            ws.max_row or (hdr_row + 18),
+            hdr_row + 18,
+            (next_header_row - 1) if next_header_row else (hdr_row + 18),
         )
 
         rows: list[dict[str, Any]] = []
         average_revenue = average_leverage = None
-        for row in range(hdr_row + 1, min(ws.max_row or hdr_row + 18, hdr_row + 18) + 1):
+        for row in range(hdr_row + 1, last_row + 1):
             label = _str(ws.cell(row, month_col).value)
-            revenue = _num(ws.cell(row, revenue_col).value)
-            leverage = _pct(ws.cell(row, leverage_col).value)
+            revenue_raw = ws.cell(row, revenue_col).value
+            leverage_raw = ws.cell(row, leverage_col).value
+            revenue = _num(revenue_raw)
+            leverage = _pct(leverage_raw)
             if label and label.strip().lower() == "average":
                 average_revenue, average_leverage = revenue, leverage
                 break
-            if label or revenue is not None or leverage is not None:
-                rows.append({
-                    "month": label or f"row {row}",
-                    "true_revenue": revenue,
-                    "leverage_pct": leverage,
-                })
+            # The template pre-labels every month and UW fills only the ones it
+            # holds statements for. A row whose cells are BLANK is an unused
+            # placeholder, not missing evidence; a row carrying a broken formula
+            # (#VALUE!, #DIV/0!) IS unreadable and must survive to be flagged.
+            if revenue_raw in (None, "") and leverage_raw in (None, ""):
+                continue
+            rows.append({
+                "month": label or f"row {row}",
+                "true_revenue": revenue,
+                "leverage_pct": leverage,
+            })
         tables.append({
-            "account_number": len(tables) + 1,
+            "account_number": acct,
+            "is_total": is_total,
             "monthly_rows": rows,
             "average_true_revenue": average_revenue,
             "average_leverage_pct": average_leverage,
@@ -498,9 +561,20 @@ def parse_uw_sheet(workbook) -> dict[str, Any]:
         if "Monthly Leverage" in idx:
             monthly_lev_avg = _pct(ws.cell(avg_row, idx["Monthly Leverage"][1]).value)
     revenue_tables = _parse_revenue_tables(ws)
+    # Accounts = bank blocks that actually carry months. The template ships 3-4
+    # empty bank sections plus the consolidated roll-up on every sheet, so
+    # counting blocks instead of populated banks declined every deal for
+    # "business bank accounts > 2".
+    # A bank block counts when it carries months OR when it is damaged
+    # (parse_error) — a table we failed to read must stay in the denominator so
+    # the gate can flag "readable for N of M account(s)" instead of hiding it.
+    populated_banks = [
+        table for table in revenue_tables
+        if not table.get("is_total") and (table["monthly_rows"] or table.get("parse_error"))
+    ]
     monthly_rows = [
         {**row, "account_number": table["account_number"]}
-        for table in revenue_tables
+        for table in populated_banks
         for row in table["monthly_rows"]
     ]
 
@@ -580,7 +654,7 @@ def parse_uw_sheet(workbook) -> dict[str, Any]:
         "true_revenue_monthly": true_rev_avg,      # avg monthly True Revenue (col H)
         "sheet_monthly_leverage": monthly_lev_avg,  # the sheet's own avg (incl. monthly funders)
         "uw_revenue_tables": revenue_tables,
-        "uw_account_count": len(revenue_tables),
+        "uw_account_count": len(populated_banks),
         "monthly_underwriting": monthly_rows,
         "positions": positions,
         "counted_funders": counted,                 # daily/weekly only
