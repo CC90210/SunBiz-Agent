@@ -106,7 +106,74 @@ def test_enricher_notify_and_gate_env_parsing() -> None:
     assert _max_notify({}) == 5                              # default cap
     assert _max_notify({"UW_ENRICH_MAX_NOTIFY": "0"}) == 0   # 0 = unlimited
     assert _max_notify({"UW_ENRICH_MAX_NOTIFY": "junk"}) == 5
-    assert _notify_enabled({})                               # notices default ON
+    assert not _notify_enabled({})                           # notices default OFF
     assert not _notify_enabled({"UW_ENRICH_NOTIFY_EZRA": "0"})
+    assert _notify_enabled({"UW_ENRICH_NOTIFY_EZRA": "1"})
     assert not _live_enabled({})                             # loop gated by default
     assert _live_enabled({"UW_ENRICH_READY": "1"})
+
+
+def test_enricher_write_never_reverts_concurrent_edits() -> None:
+    """A pass must persist only the fields it changed.
+
+    Regression for 2026-07-30: the enricher wrote back the whole `data` snapshot
+    it fetched at batch start, reverting anything changed meanwhile. It undid the
+    Dolphin visibility repair by resurrecting `transferred_at`, leaving deals on
+    neither board.
+    """
+    from uw_lead_enricher import _persist_lead_fields
+
+    stored = {
+        "business_name": "ACME",
+        "transferred_at": None,      # repaired by another writer mid-pass
+        "stage": "uw_sheet",
+        "phone": "+15550001111",     # operator typed this after the snapshot
+    }
+
+    class _FakeTable:
+        def __init__(self, store):
+            self.store = store
+            self._update = None
+
+        def select(self, *_a, **_k):
+            return self
+
+        def update(self, payload):
+            self._update = payload
+            return self
+
+        def eq(self, *_a, **_k):
+            return self
+
+        def limit(self, *_a, **_k):
+            return self
+
+        def execute(self):
+            if self._update is not None:
+                self.store.clear()
+                self.store.update(self._update["data"])
+                self._update = None
+                return type("R", (), {"data": [{"data": dict(self.store)}]})()
+            return type("R", (), {"data": [{"data": dict(self.store)}]})()
+
+    class _FakeSb:
+        def __init__(self, store):
+            self.store = store
+
+        def table(self, _name):
+            return _FakeTable(self.store)
+
+    # The stale snapshot this pass started from: pre-repair, pre-operator-edit.
+    snapshot = {
+        "business_name": "ACME",
+        "transferred_at": "2026-07-22T19:10:56Z",
+        "stage": "uw_sheet",
+        "phone": "",
+        "email": "ops@acme.test",     # the only thing this pass actually found
+    }
+    merged = _persist_lead_fields(_FakeSb(stored), "lead-1", snapshot, ["email"])
+
+    assert merged["email"] == "ops@acme.test"          # the pass's own change lands
+    assert merged["transferred_at"] is None            # repair NOT reverted
+    assert merged["phone"] == "+15550001111"           # operator edit NOT clobbered
+    assert stored["transferred_at"] is None

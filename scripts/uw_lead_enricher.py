@@ -659,6 +659,48 @@ def _enrich_contact(data: dict[str, Any], skip_web: bool = False) -> tuple[dict[
     return incoming, changed
 
 
+#: Always carried along with whatever this pass changed.
+_STAMP_KEYS = ("uw_enriched_at", "uw_enrichment_version")
+
+
+def _persist_lead_fields(
+    sb, lead_id: str, data: dict[str, Any], changed_keys: list[str]
+) -> dict[str, Any]:
+    """Write ONLY the keys this pass touched, merged onto the row as it exists NOW.
+
+    Why this is not `update({"data": data})` (2026-08-01): `data` is a snapshot
+    taken when the batch was fetched, and a pass can run for minutes. Writing the
+    whole blob back is a lost update — it silently reverts every field anyone
+    else changed meanwhile. On 2026-07-30 that resurrected `transferred_at` on
+    Dolphin leads that had just been repaired, hiding them from the Leads board
+    while their application stayed off the Applications board: visible on
+    NEITHER. Re-reading immediately before the write and applying just this
+    pass's keys keeps concurrent edits to every other field intact.
+    """
+    keys = sorted({k for k in list(changed_keys) + list(_STAMP_KEYS) if k})
+    current = (
+        sb.table("tenant_records")
+        .select("data")
+        .eq("id", lead_id)
+        .eq("tenant_id", SUNBIZ_TENANT_ID)
+        .limit(1)
+        .execute()
+    ).data or []
+    # A row that vanished mid-pass must not be recreated from the stale snapshot.
+    if not current:
+        raise RuntimeError(f"lead {lead_id} no longer exists — skipping write")
+    merged = dict(current[0].get("data") or {})
+    for key in keys:
+        if key in data:
+            merged[key] = data[key]
+        else:
+            merged.pop(key, None)  # the pass cleared it
+    sb.table("tenant_records").update({"data": merged}).eq("id", lead_id).eq(
+        "tenant_id", SUNBIZ_TENANT_ID
+    ).execute()
+    return merged
+
+
 def _publish_status_event(sb, lead_id: str, data: dict[str, Any]) -> None:
     sb.table("agent_events").insert({
         "event_type": "BRAVO_RECORD_STATUS_CHANGED",
@@ -717,7 +759,7 @@ def _revive_missing_contact_steps(sb, lead_id: str, data: dict[str, Any]) -> int
 
 
 def _notify_ezra(env: dict[str, str], data: dict[str, Any], changed: list[str]) -> bool:
-    if str(env.get("UW_ENRICH_NOTIFY_EZRA") or "1").strip().lower() in ("0", "false", "no"):
+    if not _notify_enabled(env):
         return False
     try:
         from scrubber import telegram_bridge as tg
@@ -780,7 +822,7 @@ def _notify_ezra_manual_review(env: dict[str, str], data: dict[str, Any], lead_i
 
     Honors the same UW_ENRICH_NOTIFY_EZRA kill switch as the enrichment notice.
     Callers must guard on phone_lookup_notified_at — this fires on every call."""
-    if str(env.get("UW_ENRICH_NOTIFY_EZRA") or "1").strip().lower() in ("0", "false", "no"):
+    if not _notify_enabled(env):
         return False
     try:
         from scrubber import telegram_bridge as tg
@@ -822,10 +864,14 @@ def _max_notify(env: dict[str, str]) -> int:
 
 
 def _notify_enabled(env: dict[str, str]) -> bool:
-    """Ezra verification notices on (default). Turning this off is an explicit
-    operator decision (UW_ENRICH_NOTIFY_EZRA=0) — it also waives the notify-before-
-    revive gate below, which is why it must never default off."""
-    return str(env.get("UW_ENRICH_NOTIFY_EZRA") or "1").strip().lower() not in ("0", "false", "no")
+    """Fail closed: verification notices require explicit operator opt-in.
+
+    Ingestion and enrichment must never imply permission to generate Telegram
+    traffic. Set UW_ENRICH_NOTIFY_EZRA=1 only for a supervised run.
+    """
+    return str(env.get("UW_ENRICH_NOTIFY_EZRA") or "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
 
 
 def _live_enabled(env: dict[str, str]) -> bool:
@@ -903,7 +949,7 @@ def process_once(sb, env: dict[str, str], *, dry_run: bool, limit: int, force_re
             continue
 
         try:
-            sb.table("tenant_records").update({"data": data}).eq("id", lead_id).eq("tenant_id", SUNBIZ_TENANT_ID).execute()
+            _persist_lead_fields(sb, lead_id, data, changed_keys)
             stats["updated"] += 1
             new_contact_keys = sheet_contact_keys + web_contact_keys
             if new_contact_keys:
@@ -932,8 +978,7 @@ def process_once(sb, env: dict[str, str], *, dry_run: bool, limit: int, force_re
                     stats["notified"] += 1
                     data["phone_lookup_notified_at"] = _now_iso()
                     try:
-                        sb.table("tenant_records").update({"data": data}).eq("id", lead_id).eq(
-                            "tenant_id", SUNBIZ_TENANT_ID).execute()
+                        _persist_lead_fields(sb, lead_id, data, ["phone_lookup_notified_at"])
                     except Exception as exc:  # noqa: BLE001
                         # The ping went out; failing to stamp only risks a repeat.
                         _log(f"notify stamp failed lead={lead_id}: {exc}")
