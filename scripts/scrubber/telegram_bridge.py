@@ -122,6 +122,19 @@ def _money(v: Any) -> Optional[str]:
         return None
 
 
+def _pct_text(v: Any) -> Optional[str]:
+    """Percent for a human: 2 decimals max, no trailing zeros.
+
+    Spreadsheet leverage arrives as a full-precision float (11.22989476), which
+    rendered raw made every card read like a debug dump. 30 stays "30".
+    """
+    try:
+        text = f"{round(float(v), 2):.2f}".rstrip("0").rstrip(".")
+    except (TypeError, ValueError):
+        return None
+    return text or "0"
+
+
 _CADENCE_ABBR = {"daily": "day", "weekly": "wk", "monthly": "mo"}
 
 
@@ -159,7 +172,7 @@ def _funder_lines(d: dict[str, Any]) -> list[str]:
         cad = _CADENCE_ABBR.get(p.get("cadence") or "", p.get("cadence") or "")
         bits = []
         if lev is not None:
-            bits.append(f"{lev}%")
+            bits.append(f"{_pct_text(lev) or lev}%")
         if cad:
             bits.append(cad)
         if p.get("date_funded"):
@@ -191,14 +204,15 @@ def format_packet(cand: dict[str, Any]) -> str:
     if tr:
         lines.append(f"💰 True revenue: {tr}/mo")
     if d.get("leverage_ratio") is not None:
-        lines.append(f"📊 Active leverage: {d['leverage_ratio']}% · {d.get('mca_positions', '?')} active funder(s)")
+        lev_ratio = _pct_text(d["leverage_ratio"]) or d["leverage_ratio"]
+        lines.append(f"📊 Active leverage: {lev_ratio}% · {d.get('mca_positions', '?')} active funder(s)")
     monthly = d.get("monthly_underwriting") or []
     if monthly:
         lines.append(f"🏦 UW accounts: {d.get('uw_account_count', '?')}")
         for row in monthly:
             revenue = _money(row.get("true_revenue")) or "unknown"
             leverage = row.get("leverage_pct")
-            lev_text = f" · {leverage:g}% lev" if isinstance(leverage, (int, float)) else ""
+            lev_text = f" · {_pct_text(leverage)}% lev" if isinstance(leverage, (int, float)) else ""
             lines.append(
                 f"  A{row.get('account_number', '?')} {row.get('month', '?')}: "
                 f"{revenue}{lev_text}"
