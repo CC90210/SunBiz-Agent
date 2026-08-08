@@ -1,0 +1,20 @@
+# Turso shim - shared runtime, byte-identical across CEO-Agent and SunBiz-Agent.
+#
+# Both repos ship the same files so neither has to put the other on sys.path:
+# each has a REGULAR scripts/lib package, so a path insert makes one shadow the
+# other wholesale - it would silently swap lib.claude_cli inside 6 live daemons.
+#
+# Copies drift silently. These hashes are asserted by
+# tests/test_turso_shim_parity.py in BOTH repos, so a unilateral edit to either
+# copy fails that repo's own test. To change the shim: edit it in CEO-Agent,
+# copy across, regenerate this file in both, and land both PRs together.
+
+c255421eb58b6d58b4a99f883c97a9971a3181ed00879cca7f8afbe3cb9ccc3b  scripts/_bootstrap/sitecustomize.py
+e01a2ccee288278ae43045aab5cf1c063588e3da13d0904e2d31a7b55f1295a0  scripts/install_python_switch.py
+44beb296cfeda27f71839c1752819d04d1c99aaa63c8aac7641b0a9f654b3e66  scripts/lib/db_turso.py
+79cda931e3482082988fb7ebe19ba8baa9bbc1f672bca452b4d87a8c2e6db364  scripts/lib/r2_storage.py
+e690409994134a7b6ecc2ed20a3276d142337654a02e956d6a52b9fbe8a8d114  scripts/lib/secret_loader.py
+4db8416d69a23160bbac059d8df36ed28e2c4778134f9b357bd0cd9c091f848d  scripts/lib/structured_log.py
+ef16eb2994ee64e064062eb5d3bee5cbdb4b6e1f54abac659de8795f83af554b  scripts/lib/tls_trust.py
+4c15492876c3b48f0022b82a6d769ddd74f1a748260336306f7a2985fab4aa4e  scripts/lib/turso_supabase_compat.py
+dfe66022bfe5fc3b28244ccb6cd514d31b6ed01e055d62fc9049c04069864238  scripts/lib/turso_switch.py
