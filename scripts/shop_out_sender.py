@@ -401,18 +401,46 @@ def _claim_pending(client, batch_size: int, tenant_id: Optional[str], *, dry_run
     # Keep it single-instance.
     stale_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
 
-    def build(cols: str):
+    # Two flat queries rather than one PostgREST `or_` carrying a nested
+    # `and(...)` group. The Turso compat layer (CEO-Agent
+    # lib/turso_supabase_compat.py:or_) splits an or_ expression on "," and
+    # then on ".", so a nested group parses as a column named "and(status"
+    # and the whole SELECT is rejected by libSQL. That broke the claim query
+    # outright after the 2026-08-09 cutover; it went unnoticed only because
+    # this cron was parked on 2026-08-06.
+    #
+    # Taking the first `limit` of each branch and re-sorting is equivalent to
+    # the original single-query ordering: the overall oldest `limit` rows are
+    # necessarily contained in the union of each branch's oldest `limit`.
+    def build_pending(cols: str):
         q = (
             client.table("application_lender_threads")
             .select(cols)
-            .or_(f"status.eq.pending,and(status.eq.sending,updated_at.lt.{stale_cutoff})")
+            .eq("status", "pending")
             .order("created_at", desc=False)
             .limit(limit)
         )
         if tenant_id:
             q = q.eq("tenant_id", tenant_id)
         return q
-    candidates = _query_threads(build)
+
+    def build_stale_sending(cols: str):
+        q = (
+            client.table("application_lender_threads")
+            .select(cols)
+            .eq("status", "sending")
+            .lt("updated_at", stale_cutoff)
+            .order("created_at", desc=False)
+            .limit(limit)
+        )
+        if tenant_id:
+            q = q.eq("tenant_id", tenant_id)
+        return q
+
+    by_id: dict[str, dict] = {}
+    for row in _query_threads(build_pending) + _query_threads(build_stale_sending):
+        by_id.setdefault(row["id"], row)
+    candidates = sorted(by_id.values(), key=lambda r: (r.get("created_at") or ""))[:limit]
     if not candidates:
         return []
     ids = [c["id"] for c in candidates]
