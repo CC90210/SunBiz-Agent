@@ -18,7 +18,7 @@ Callers import:
     if record.tenant_id == SUNBIZ_TENANT_ID:
         # SunBiz-specific path
 
-    brand = resolve_brand(record.tenant_id)   # "sunbiz" | "oasis"
+    brand = resolve_brand(record.tenant_id)   # "sunbiz" | None
 
 Module-level constants only — no side effects, no I/O, no logging. Safe
 to import from anywhere including hot paths.
@@ -34,14 +34,17 @@ from __future__ import annotations
 SUNBIZ_TENANT_ID: str = "aa04fa1f-ad6a-44b0-ac4b-2ff5d1067110"
 
 
-def resolve_brand(tenant_id: str | None) -> str:
+def resolve_brand(tenant_id: str | None) -> str | None:
     """Map a tenant_id to the send_gateway BRAND_IDENTITY key.
 
     Used by every daemon that calls send_gateway.send(brand=...). Keeping
     this in one place means a new tenant onboarding only touches THIS
     file — not every cold-outreach / sequence / blast script.
 
-    Returns "sunbiz" for the SunBiz tenant, "oasis" for everything else
-    (OASIS is the empire-default brand for owned-by-CC outbound).
+    Returns "sunbiz" for the SunBiz tenant and None for every other one.
+    These daemons run on SunBiz's box with SunBiz's mailboxes, so there
+    is no other brand they may send as. It used to return "oasis" for any
+    other tenant, which would have mailed another company's leads from
+    SunBiz's box under OASIS's name. Callers must refuse to send on None.
     """
-    return "sunbiz" if tenant_id == SUNBIZ_TENANT_ID else "oasis"
+    return "sunbiz" if tenant_id == SUNBIZ_TENANT_ID else None

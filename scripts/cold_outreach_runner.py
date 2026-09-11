@@ -4,7 +4,7 @@ Part of the SunBiz second-meeting (2026-05-25) expansion.
 Migration dependency: 069 (adds cold_outreach_campaigns + cold_outreach_recipients tables).
 
 Reads:
-  - cold_outreach_campaigns where status IN ('queued', 'sending')
+  - cold_outreach_campaigns where tenant_id=SunBiz AND status IN ('queued', 'sending')
   - cold_outreach_recipients where status='pending' for the active campaign
 
 Writes:
@@ -55,7 +55,7 @@ LOG_PATH = STATE_DIR / "cold_outreach_runner.log"
 
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from _bravo_bootstrap import bootstrap_bravo_path  # noqa: E402
-from sunbiz_constants import resolve_brand  # noqa: E402
+from sunbiz_constants import SUNBIZ_TENANT_ID, resolve_brand  # noqa: E402
 
 BRAVO_ROOT = bootstrap_bravo_path()
 
@@ -316,6 +316,15 @@ def _process_campaign(sb, campaign: dict[str, Any], send_fn) -> None:
     message_body: str = campaign.get("message_body") or ""
     subject: str = campaign.get("subject") or ""
 
+    # Refuse before touching the campaign or its recipients. This daemon
+    # sends only as SunBiz, and resolve_brand() has no brand for any other
+    # tenant. tick() fetches SunBiz campaigns only; this covers any caller
+    # that hands in another tenant's row.
+    brand = resolve_brand(tenant_id)
+    if brand is None:
+        _log(f"refused campaign={campaign_id} tenant={tenant_id}: not a SunBiz campaign")
+        return
+
     _log(f"processing campaign={campaign_id[:8]}... channel={channel} "
          f"sent={sent_count} failed={failed_count} total={total_recipients} cap={daily_cap}")
 
@@ -398,7 +407,7 @@ def _process_campaign(sb, campaign: dict[str, Any], send_fn) -> None:
             "channel": gw_channel,
             "body_text": rendered_body,
             "agent_source": DAEMON_NAME,
-            "brand": resolve_brand(tenant_id),
+            "brand": brand,
             "intent": "commercial",
             # Same defensive pattern as shop_out_sender.py + sequence_runner.py
             # — we know the tenant from the campaign row, so we pass it to
@@ -480,8 +489,8 @@ def _process_campaign(sb, campaign: dict[str, Any], send_fn) -> None:
 def _promote_scheduled_campaigns(sb) -> int:
     """Build 3: promote scheduled campaigns whose time has come.
 
-    UPDATE cold_outreach_campaigns SET status='queued' WHERE status='draft'
-    AND scheduled_for <= now() (UTC). A SQL NULL scheduled_for never satisfies
+    UPDATE cold_outreach_campaigns SET status='queued' WHERE tenant_id=SunBiz
+    AND status='draft' AND scheduled_for <= now() (UTC). A SQL NULL scheduled_for never satisfies
     `<=`, so unscheduled drafts are left alone without an explicit not-null
     filter. A promoted campaign is drained on the NEXT tick (tick() pulls one
     queued/sending campaign after this runs). Returns the number promoted."""
@@ -490,6 +499,10 @@ def _promote_scheduled_campaigns(sb) -> int:
         res = (
             sb.table("cold_outreach_campaigns")
             .update({"status": "queued"})
+            # SunBiz's campaigns only. The service-role client sees every
+            # tenant, so without this the daemon would queue other tenants'
+            # drafts as well.
+            .eq("tenant_id", SUNBIZ_TENANT_ID)
             .eq("status", "draft")
             .lte("scheduled_for", now_iso)
             .execute()
@@ -524,12 +537,14 @@ def tick() -> int:
             sb.table("cold_outreach_campaigns")
             .select(
                 # 'brand' column is not in the live cold_outreach_campaigns
-                # schema; selecting it 400s. campaign.get("brand") below already
-                # defaults to "oasis", so omit it here. Re-add this column (and a
-                # migration) if/when per-campaign branding is introduced.
+                # schema; selecting it 400s. The brand comes from the tenant
+                # (resolve_brand in _process_campaign), so omit it here. Re-add
+                # this column (and a migration) if/when per-campaign branding
+                # is introduced.
                 "id, tenant_id, status, channel, message_body, subject, "
                 "daily_cap, sent_count, failed_count, total_recipients"
             )
+            .eq("tenant_id", SUNBIZ_TENANT_ID)  # SunBiz's campaigns only
             .in_("status", ["queued", "sending"])
             .order("created_at", desc=False)
             .limit(1)

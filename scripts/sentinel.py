@@ -462,7 +462,10 @@ def _apply_pause(sb, tenant_id: str, lead_id: str, rolling_avg: float,
     try:
         if BRAVO_ROOT is not None:
             sys.path.insert(0, str(BRAVO_ROOT / "scripts"))
-            from event_bus import publish as _bus_publish  # type: ignore
+            # The bus is CEO-Agent's scripts/core/event_bus.py. A bare
+            # `from event_bus import` raised "No module named 'event_bus'"
+            # on every pause, so the pause was written but never announced.
+            from core.event_bus import publish as _bus_publish  # type: ignore
             _bus_publish(
                 "BRAVO_SENTIMENT_PAUSE",
                 {

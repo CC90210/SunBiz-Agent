@@ -48,7 +48,7 @@ IDEMPOTENCY
 CLI
 ---
 
-  python scripts/shop_out_sender.py once             # one tick
+  python scripts/shop_out_sender.py once             # one tick, SunBiz's tenant unless --tenant-id
   python scripts/shop_out_sender.py once --dry-run   # plan only, no SMTP
   python scripts/shop_out_sender.py loop --interval 60
   python scripts/shop_out_sender.py once --tenant-id <uuid> --batch 10
@@ -95,6 +95,7 @@ LOG_PATH = STATE_DIR / "shop_out_sender.log"
 
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from _bravo_bootstrap import bootstrap_bravo_path  # noqa: E402
+from sunbiz_constants import SUNBIZ_TENANT_ID  # noqa: E402
 
 # CEO-Agent runtime probe — see _bravo_bootstrap.py. Adds
 # CEO-Agent/scripts/ to sys.path so the cross-repo imports
@@ -738,6 +739,11 @@ def _process_thread(client, send_fn, thread: dict, dry_run: bool) -> dict:
 # ─── Tick / loop ────────────────────────────────────────────────────
 
 def run_once(batch: int, tenant_id: Optional[str], dry_run: bool) -> dict:
+    if not tenant_id:
+        # An empty tenant id drops the tenant filter from the claim, which
+        # takes every tenant's pending threads. Same rule as retry_errors.
+        sys.stderr.write("[shop_out_sender] refusing to run without a tenant id\n")
+        return {"ok": False, "error": "tenant_id_required", "processed": 0}
     client = _supabase()
     if client is None:
         return {"ok": False, "error": "supabase_unavailable", "processed": 0}
@@ -865,13 +871,16 @@ def main() -> int:
 
     once = sub.add_parser("once", help="Process one batch and exit")
     once.add_argument("--batch", type=int, default=DEFAULT_BATCH)
-    once.add_argument("--tenant-id", type=str, default=None)
+    # SunBiz's tenant by default. The dashboard cron runs this with args
+    # ["once"] and no --tenant-id, and a None default claimed every
+    # tenant's pending threads. Pass --tenant-id to run for another tenant.
+    once.add_argument("--tenant-id", type=str, default=SUNBIZ_TENANT_ID)
     once.add_argument("--dry-run", action="store_true")
     once.add_argument("--json", action="store_true")
 
     loop = sub.add_parser("loop", help="Run continuously")
     loop.add_argument("--batch", type=int, default=DEFAULT_BATCH)
-    loop.add_argument("--tenant-id", type=str, default=None)
+    loop.add_argument("--tenant-id", type=str, default=SUNBIZ_TENANT_ID)
     loop.add_argument("--interval", type=int, default=DEFAULT_INTERVAL_SECONDS)
     loop.add_argument("--dry-run", action="store_true")
 

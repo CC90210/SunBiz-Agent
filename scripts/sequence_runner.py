@@ -67,7 +67,7 @@ LOG_PATH = STATE_DIR / "sequence_runner.log"
 # (_bravo_bootstrap.py) and any local sibling imports resolve.
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from _bravo_bootstrap import bootstrap_bravo_path  # noqa: E402
-from sunbiz_constants import resolve_brand  # noqa: E402
+from sunbiz_constants import SUNBIZ_TENANT_ID, resolve_brand  # noqa: E402
 
 # Resolve CEO-Agent runtime and add its scripts/ to sys.path so the
 # shared infrastructure imports below — lib.secret_loader,
@@ -553,7 +553,11 @@ def enrollment_tick(sb) -> int:
         event_type = ev.get("event_type") or ""
         payload = ev.get("payload") or {}
         tenant_id = payload.get("tenant_id")
-        if not tenant_id:
+        # agent_events is one bus that every tenant writes to. This daemon
+        # acts for SunBiz only, so another tenant's event must not cancel,
+        # enroll or underwrite anything here. The cursor still moves past
+        # it (latest_ts is set above).
+        if tenant_id != SUNBIZ_TENANT_ID:
             continue
 
         # 2026-05-25 second SunBiz product meeting expansion + migration 069:
@@ -861,6 +865,14 @@ def _send_step(sb, state_row: dict, sequence: dict) -> dict:
     # registry already has the "sunbiz" entry — we just need to pick it
     # based on the lead's tenant.
     tenant_brand = resolve_brand(state_row.get("tenant_id"))
+    if tenant_brand is None:
+        # Not SunBiz's row. Never let send_gateway pick a brand for another
+        # company's lead from SunBiz's box. execution_tick claims SunBiz
+        # rows only, so reaching this means a caller skipped that filter.
+        return {
+            "outcome": "permanent",
+            "detail": f"refused: tenant {state_row.get('tenant_id')} is not SunBiz",
+        }
 
     # Pass tenant_id explicitly so send_gateway's kill-switch gate doesn't
     # depend on its own DB lookup (which fail-closed for shop-out before
@@ -995,6 +1007,9 @@ def execution_tick(sb) -> int:
         due = (
             sb.table("sequence_state")
             .select("id")
+            # SunBiz's rows only. The service-role client sees every tenant,
+            # and the claim below takes whatever ids this returns.
+            .eq("tenant_id", SUNBIZ_TENANT_ID)
             .eq("status", "scheduled")
             .is_("claimed_at", "null")
             .lte("scheduled_for", now_iso)
