@@ -192,8 +192,9 @@ def _upsert_item(
     return True
 
 
-def _flush_upserts(sb) -> int:
-    """Write every queued row. Returns how many rows FAILED to write.
+def _flush_upserts(sb) -> tuple[int, int]:
+    """Write every queued row. Returns (written, failed), both counted over the
+    DEDUPLICATED rows: two queued rows for one key are one plan item.
 
     Deduplicates on the conflict key first (last write for a key wins) so a
     single statement never carries two rows targeting the same unique index
@@ -203,7 +204,7 @@ def _flush_upserts(sb) -> int:
     global _PENDING
     queued, _PENDING = _PENDING, []
     if not queued:
-        return 0
+        return 0, 0
 
     deduped: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     for row in queued:
@@ -227,7 +228,7 @@ def _flush_upserts(sb) -> int:
                     f"upsert failed tenant={row['tenant_id']} "
                     f"lead={row['lead_id']} cat={row['category']}: {e}"
                 )
-    return failed
+    return len(rows) - failed, failed
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -717,8 +718,8 @@ def tick() -> int:
             "renewal_eligible": _gen_renewal_eligible(sb, tid, today),
         }
         # Nothing has been written yet — the six passes above only queued.
-        failed = _flush_upserts(sb)
-        total = sum(counts.values()) - failed
+        written, failed = _flush_upserts(sb)
+        total = written
         grand_total += total
         if failed:
             _log(f"tenant={tid[:8]}...: {failed} plan item(s) failed to write")

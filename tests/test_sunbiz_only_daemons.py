@@ -241,17 +241,22 @@ def test_sequence_send_step_refuses_another_tenants_row(monkeypatch):
     package.send_gateway = gateway
     monkeypatch.setitem(sys.modules, "integrations", package)
     monkeypatch.setitem(sys.modules, "integrations.send_gateway", gateway)
+    # Refused BEFORE anything about the row is read: this box must not load
+    # another company's lead or rep even to reject it. (CodeRabbit, PR #3.)
     monkeypatch.setattr(sr, "_build_context",
-                        lambda *a, **k: {"lead": {"email": "owner@example.com"}})
-    monkeypatch.setattr(sr, "_resolve_assigned_rep_email", lambda *a, **k: None)
+                        lambda *a, **k: pytest.fail("read the foreign lead before refusing it"))
+    monkeypatch.setattr(sr, "_resolve_assigned_rep_email",
+                        lambda *a, **k: pytest.fail("read the foreign rep before refusing it"))
 
     row = {"tenant_id": OTHER_TENANT, "lead_id": "lead-other", "step_index": 0,
            "context_snapshot": {}}
     sequence = {"id": "seq-1", "name": "drip",
                 "steps": [{"channel": "email", "subject": "Hi", "body_text": "Hello"}]}
-    result = sr._send_step(FakeSupabase(), row, sequence)
+    fake = FakeSupabase()
+    result = sr._send_step(fake, row, sequence)
     assert sent == []
     assert result["outcome"] == "permanent"
+    assert fake.queries == [], "the refusal queried the database"
 
 
 # ── (c) lender_response_classifier ──────────────────────────────────
@@ -325,6 +330,29 @@ def test_shop_out_refuses_an_empty_tenant(monkeypatch):
     out = sos.run_once(5, "", True)
     assert out["ok"] is False
     assert out["error"] == "tenant_id_required"
+
+
+@pytest.mark.parametrize("command", ["once", "loop"])
+@pytest.mark.parametrize("tenant", ["", "   "])
+def test_shop_out_main_refuses_a_blank_tenant_before_starting(monkeypatch, command, tenant):
+    # run_loop discarded run_once's tenant_id_required and spun forever on a
+    # blank tenant. main() now refuses before either starts. (CodeRabbit, PR #3.)
+    sos = _mod("shop_out_sender")
+    monkeypatch.setattr(sos, "run_once", lambda *a, **k: pytest.fail("started once with a blank tenant"))
+    monkeypatch.setattr(sos, "run_loop", lambda *a, **k: pytest.fail("started loop with a blank tenant"))
+    monkeypatch.setattr(sys, "argv", ["shop_out_sender.py", command, "--tenant-id", tenant])
+    assert sos.main() == 2
+
+
+def test_daily_plan_counts_one_write_per_plan_item(monkeypatch):
+    # Two queued rows for one (tenant, date, lead, category) are one plan
+    # item: the tick must report one write, not two. (CodeRabbit, PR #3.)
+    dpg = _mod("daily_plan_generator")
+    row = {"tenant_id": "aa04fa1f-ad6a-44b0-ac4b-2ff5d1067110", "plan_date": "2026-09-12", "lead_id": "lead-1",
+           "category": "priority_call", "status": "open"}
+    monkeypatch.setattr(dpg, "_PENDING", [dict(row), dict(row, status="open")])
+    written, failed = dpg._flush_upserts(FakeSupabase())
+    assert (written, failed) == (1, 0)
 
 
 # ── (e) sentinel ────────────────────────────────────────────────────

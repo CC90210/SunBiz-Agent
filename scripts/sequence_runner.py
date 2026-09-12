@@ -816,6 +816,18 @@ def _send_step(sb, state_row: dict, sequence: dict) -> dict:
     body_html_template = step.get("body_html") or ""
     subject_template = step.get("subject") or ""
 
+    tenant_brand = resolve_brand(state_row.get("tenant_id"))
+    if tenant_brand is None:
+        # Not SunBiz's row. Refuse BEFORE reading its lead or its rep: this
+        # box must not load another company's data even to reject it. Never
+        # let send_gateway pick a brand for another
+        # company's lead from SunBiz's box. execution_tick claims SunBiz
+        # rows only, so reaching this means a caller skipped that filter.
+        return {
+            "outcome": "permanent",
+            "detail": f"refused: tenant {state_row.get('tenant_id')} is not SunBiz",
+        }
+
     ctx = _build_context(
         sb, state_row["tenant_id"], state_row["lead_id"], state_row.get("context_snapshot") or {}
     )
@@ -864,15 +876,6 @@ def _send_step(sb, state_row: dict, sequence: dict) -> dict:
     # original hardcoded brand="oasis" implied. send_gateway's BRAND_IDENTITY
     # registry already has the "sunbiz" entry — we just need to pick it
     # based on the lead's tenant.
-    tenant_brand = resolve_brand(state_row.get("tenant_id"))
-    if tenant_brand is None:
-        # Not SunBiz's row. Never let send_gateway pick a brand for another
-        # company's lead from SunBiz's box. execution_tick claims SunBiz
-        # rows only, so reaching this means a caller skipped that filter.
-        return {
-            "outcome": "permanent",
-            "detail": f"refused: tenant {state_row.get('tenant_id')} is not SunBiz",
-        }
 
     # Pass tenant_id explicitly so send_gateway's kill-switch gate doesn't
     # depend on its own DB lookup (which fail-closed for shop-out before

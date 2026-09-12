@@ -908,6 +908,14 @@ def main() -> int:
 
     args = parser.parse_args()
 
+    if args.cmd in ("once", "loop"):
+        # A blank or whitespace tenant is refused here: run_loop would discard
+        # run_once's tenant_id_required and spin forever doing nothing.
+        args.tenant_id = (args.tenant_id or "").strip()
+        if not args.tenant_id:
+            print("shop_out_sender: --tenant-id is blank; refusing to start", file=sys.stderr)
+            return 2
+
     if args.cmd == "once":
         summary = run_once(args.batch, args.tenant_id, args.dry_run)
         if args.json:
