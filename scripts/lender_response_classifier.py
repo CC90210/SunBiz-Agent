@@ -254,9 +254,10 @@ def sla_sweep(sb) -> int:
             .select("id, lender_id, tenant_id, sent_at")
             .eq("status", "sent")
             .not_.is_("sent_at", "null")
+            # Always filtered. main() refuses to start with an empty tenant
+            # id, and an empty value here matches no row instead of every row.
+            .eq("tenant_id", SUNBIZ_TENANT_ID)
         )
-        if SUNBIZ_TENANT_ID:
-            q = q.eq("tenant_id", SUNBIZ_TENANT_ID)
         rows = q.execute()
     except Exception as e:
         _log(f"sla_sweep: read failed: {e}")
@@ -953,9 +954,8 @@ def classify_tick(sb) -> int:
             .select("id, tenant_id, application_id, gmail_thread_id, status, sent_at")
             .eq("status", "sent")
             .not_.is_("gmail_thread_id", "null")
+            .eq("tenant_id", SUNBIZ_TENANT_ID)  # always; see sla_sweep
         )
-        if SUNBIZ_TENANT_ID:
-            q = q.eq("tenant_id", SUNBIZ_TENANT_ID)
         rows = q.execute()
     except Exception as e:
         _log(f"classify_tick: read failed: {e}")
@@ -1116,6 +1116,13 @@ def main(argv: list[str] | None = None) -> int:
     tl.set_defaults(func=lambda a: tail(a.count))
 
     args = p.parse_args(argv)
+    if args.command in ("once", "loop") and not SUNBIZ_TENANT_ID:
+        # The tenant constant failed to import and no env fallback is set.
+        # Exit loudly (PM2 shows the daemon down and the liveness pager
+        # fires) instead of classifying every tenant's lender threads with
+        # SunBiz's Gmail and model.
+        _log("refusing to start: SUNBIZ_TENANT_ID is empty")
+        return 2
     return args.func(args)
 
 

@@ -136,8 +136,29 @@ def _resolve_tenant_ids(sb, slug_filter: str) -> list[str]:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Upsert helper
+# Upsert helper — batched
 # ─────────────────────────────────────────────────────────────────────
+#
+# Writes are queued and flushed in multi-row statements rather than sent
+# one row at a time. One round-trip per plan item cost a few milliseconds
+# against Supabase; after the 2026-08-09 Turso cutover it costs ~0.44s. At
+# ~1,250 items that is ~9 minutes of pure write latency, and the cron
+# executor (CEO-Agent bravo_cli/cron_runner.py:_exec_script_run) kills any
+# job at a hard 300s timeout. That is why this cron stopped producing a
+# plan after 2026-08-05: it was being killed mid-write every morning and
+# never got as far as reporting a result, so its row still read "success".
+
+#: Rows per INSERT. The compat layer emits one statement with N VALUES
+#: tuples, so this is the round-trip count divider. 200 keeps the
+#: statement well inside libSQL limits while cutting ~1,250 round-trips
+#: to ~7.
+_BATCH_SIZE = 200
+
+#: Unique key behind the ON CONFLICT clause (migration 069).
+_CONFLICT_KEY = "tenant_id,plan_date,lead_id,category"
+
+#: Queued rows awaiting a flush. Drained by _flush_upserts().
+_PENDING: list[dict[str, Any]] = []
 
 
 def _upsert_item(
@@ -149,25 +170,65 @@ def _upsert_item(
     reason: str,                              # Codex 2026-05-25 P0 finding: schema requires reason NOT NULL; drop source/data
     metadata: Optional[dict[str, Any]] = None,
 ) -> bool:
-    try:
-        sb.table("daily_plan_items").upsert(
-            {
-                "tenant_id": tenant_id,
-                "plan_date": plan_date,
-                "lead_id": lead_id,
-                "category": category,
-                "status": "open",
-                # Codex 2026-05-25 P0 finding: migration 069 defines reason (NOT NULL) + metadata JSONB;
-                # the old source + data columns do not exist — every prior upsert silently failed.
-                "reason": reason,
-                "metadata": metadata or {},
-            },
-            on_conflict="tenant_id,plan_date,lead_id,category",
-        ).execute()
-        return True
-    except Exception as e:
-        _log(f"upsert failed tenant={tenant_id} lead={lead_id} cat={category}: {e}")
-        return False
+    """Queue one plan item for the next flush.
+
+    Returns True for "accepted into the batch" — the write itself happens in
+    _flush_upserts(), which is where a failure is counted and logged. sb is
+    unused here and kept so callers do not have to change.
+    """
+    _PENDING.append(
+        {
+            "tenant_id": tenant_id,
+            "plan_date": plan_date,
+            "lead_id": lead_id,
+            "category": category,
+            "status": "open",
+            # Codex 2026-05-25 P0 finding: migration 069 defines reason (NOT NULL) + metadata JSONB;
+            # the old source + data columns do not exist — every prior upsert silently failed.
+            "reason": reason,
+            "metadata": metadata or {},
+        }
+    )
+    return True
+
+
+def _flush_upserts(sb) -> tuple[int, int]:
+    """Write every queued row. Returns (written, failed), both counted over the
+    DEDUPLICATED rows: two queued rows for one key are one plan item.
+
+    Deduplicates on the conflict key first (last write for a key wins) so a
+    single statement never carries two rows targeting the same unique index
+    entry. If a batch is rejected its rows are retried individually, so one
+    bad row costs one row rather than the whole batch.
+    """
+    global _PENDING
+    queued, _PENDING = _PENDING, []
+    if not queued:
+        return 0, 0
+
+    deduped: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    for row in queued:
+        deduped[(row["tenant_id"], row["plan_date"], row["lead_id"], row["category"])] = row
+    rows = list(deduped.values())
+
+    failed = 0
+    for start in range(0, len(rows), _BATCH_SIZE):
+        chunk = rows[start:start + _BATCH_SIZE]
+        try:
+            sb.table("daily_plan_items").upsert(chunk, on_conflict=_CONFLICT_KEY).execute()
+            continue
+        except Exception as e:
+            _log(f"batch upsert of {len(chunk)} rows failed ({e}) — retrying row by row")
+        for row in chunk:
+            try:
+                sb.table("daily_plan_items").upsert(row, on_conflict=_CONFLICT_KEY).execute()
+            except Exception as e:
+                failed += 1
+                _log(
+                    f"upsert failed tenant={row['tenant_id']} "
+                    f"lead={row['lead_id']} cat={row['category']}: {e}"
+                )
+    return len(rows) - failed, failed
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -656,8 +717,12 @@ def tick() -> int:
             "shop_today": _gen_shop_today(sb, tid, today),
             "renewal_eligible": _gen_renewal_eligible(sb, tid, today),
         }
-        total = sum(counts.values())
+        # Nothing has been written yet — the six passes above only queued.
+        written, failed = _flush_upserts(sb)
+        total = written
         grand_total += total
+        if failed:
+            _log(f"tenant={tid[:8]}...: {failed} plan item(s) failed to write")
         _log(
             f"tenant={tid[:8]}..., date={today}: "
             f"{counts['priority_call']} priority calls, "

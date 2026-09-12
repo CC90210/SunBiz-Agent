@@ -48,7 +48,7 @@ IDEMPOTENCY
 CLI
 ---
 
-  python scripts/shop_out_sender.py once             # one tick
+  python scripts/shop_out_sender.py once             # one tick, SunBiz's tenant unless --tenant-id
   python scripts/shop_out_sender.py once --dry-run   # plan only, no SMTP
   python scripts/shop_out_sender.py loop --interval 60
   python scripts/shop_out_sender.py once --tenant-id <uuid> --batch 10
@@ -95,6 +95,7 @@ LOG_PATH = STATE_DIR / "shop_out_sender.log"
 
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from _bravo_bootstrap import bootstrap_bravo_path  # noqa: E402
+from sunbiz_constants import SUNBIZ_TENANT_ID  # noqa: E402
 
 # CEO-Agent runtime probe — see _bravo_bootstrap.py. Adds
 # CEO-Agent/scripts/ to sys.path so the cross-repo imports
@@ -401,18 +402,46 @@ def _claim_pending(client, batch_size: int, tenant_id: Optional[str], *, dry_run
     # Keep it single-instance.
     stale_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
 
-    def build(cols: str):
+    # Two flat queries rather than one PostgREST `or_` carrying a nested
+    # `and(...)` group. The Turso compat layer (CEO-Agent
+    # lib/turso_supabase_compat.py:or_) splits an or_ expression on "," and
+    # then on ".", so a nested group parses as a column named "and(status"
+    # and the whole SELECT is rejected by libSQL. That broke the claim query
+    # outright after the 2026-08-09 cutover; it went unnoticed only because
+    # this cron was parked on 2026-08-06.
+    #
+    # Taking the first `limit` of each branch and re-sorting is equivalent to
+    # the original single-query ordering: the overall oldest `limit` rows are
+    # necessarily contained in the union of each branch's oldest `limit`.
+    def build_pending(cols: str):
         q = (
             client.table("application_lender_threads")
             .select(cols)
-            .or_(f"status.eq.pending,and(status.eq.sending,updated_at.lt.{stale_cutoff})")
+            .eq("status", "pending")
             .order("created_at", desc=False)
             .limit(limit)
         )
         if tenant_id:
             q = q.eq("tenant_id", tenant_id)
         return q
-    candidates = _query_threads(build)
+
+    def build_stale_sending(cols: str):
+        q = (
+            client.table("application_lender_threads")
+            .select(cols)
+            .eq("status", "sending")
+            .lt("updated_at", stale_cutoff)
+            .order("created_at", desc=False)
+            .limit(limit)
+        )
+        if tenant_id:
+            q = q.eq("tenant_id", tenant_id)
+        return q
+
+    by_id: dict[str, dict] = {}
+    for row in _query_threads(build_pending) + _query_threads(build_stale_sending):
+        by_id.setdefault(row["id"], row)
+    candidates = sorted(by_id.values(), key=lambda r: (r.get("created_at") or ""))[:limit]
     if not candidates:
         return []
     ids = [c["id"] for c in candidates]
@@ -710,6 +739,11 @@ def _process_thread(client, send_fn, thread: dict, dry_run: bool) -> dict:
 # ─── Tick / loop ────────────────────────────────────────────────────
 
 def run_once(batch: int, tenant_id: Optional[str], dry_run: bool) -> dict:
+    if not tenant_id:
+        # An empty tenant id drops the tenant filter from the claim, which
+        # takes every tenant's pending threads. Same rule as retry_errors.
+        sys.stderr.write("[shop_out_sender] refusing to run without a tenant id\n")
+        return {"ok": False, "error": "tenant_id_required", "processed": 0}
     client = _supabase()
     if client is None:
         return {"ok": False, "error": "supabase_unavailable", "processed": 0}
@@ -837,13 +871,16 @@ def main() -> int:
 
     once = sub.add_parser("once", help="Process one batch and exit")
     once.add_argument("--batch", type=int, default=DEFAULT_BATCH)
-    once.add_argument("--tenant-id", type=str, default=None)
+    # SunBiz's tenant by default. The dashboard cron runs this with args
+    # ["once"] and no --tenant-id, and a None default claimed every
+    # tenant's pending threads. Pass --tenant-id to run for another tenant.
+    once.add_argument("--tenant-id", type=str, default=SUNBIZ_TENANT_ID)
     once.add_argument("--dry-run", action="store_true")
     once.add_argument("--json", action="store_true")
 
     loop = sub.add_parser("loop", help="Run continuously")
     loop.add_argument("--batch", type=int, default=DEFAULT_BATCH)
-    loop.add_argument("--tenant-id", type=str, default=None)
+    loop.add_argument("--tenant-id", type=str, default=SUNBIZ_TENANT_ID)
     loop.add_argument("--interval", type=int, default=DEFAULT_INTERVAL_SECONDS)
     loop.add_argument("--dry-run", action="store_true")
 
@@ -870,6 +907,14 @@ def main() -> int:
     retry.add_argument("--json", action="store_true")
 
     args = parser.parse_args()
+
+    if args.cmd in ("once", "loop"):
+        # A blank or whitespace tenant is refused here: run_loop would discard
+        # run_once's tenant_id_required and spin forever doing nothing.
+        args.tenant_id = (args.tenant_id or "").strip()
+        if not args.tenant_id:
+            print("shop_out_sender: --tenant-id is blank; refusing to start", file=sys.stderr)
+            return 2
 
     if args.cmd == "once":
         summary = run_once(args.batch, args.tenant_id, args.dry_run)

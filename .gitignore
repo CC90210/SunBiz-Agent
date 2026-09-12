@@ -3,6 +3,11 @@
 .env
 .env.local
 .long_lived_token.txt
+# Any copy or backup of the agents env file (an editor's .save, a manual
+# backup) must never be tracked; only the template is.
+.env.agents.*
+.env.agents~
+!.env.agents.template
 
 # Playwright MCP data
 .playwright-mcp/
